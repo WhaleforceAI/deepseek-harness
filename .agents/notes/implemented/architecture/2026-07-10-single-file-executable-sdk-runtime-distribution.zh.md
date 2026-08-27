@@ -30,6 +30,8 @@ exe 使用 [@yao-pkg/pkg](https://github.com/yao-pkg/pkg)（vercel/pkg 归档后
 - [`packages/sdk/server`](../../../../packages/sdk/server/README.zh.md)（`@deepseek-ai/dsh-sdk-jsonrpc-server`）：纯协议插件；执行 `apply` 时，在进程 stdio 上挂载 `HarnessSdkJsonRpcServer` 与按行分隔的 JSON-RPC 传输层，资源释放走 `ctx.effect()`。是否提供服务由 `cordis.yml` 决定；未挂载该插件的配置会启动一个不提供此服务的合法进程。协议级退出归插件所有（应答并确保 `shutdown` 响应发送完毕后，对根运行时执行 dispose（资源释放），让待处理的持久化操作完成，再调用 `exit(0)`；HMR（热模块替换）式卸载只停止服务，不退出进程）。
 - [`apps/cli`](../../../../apps/cli/README.zh.md)（`@deepseek-ai/dsh`）：打包后的应用入口；其 `sdk` profile 挂载 `dsh-sdk-jsonrpc-server`，CLI 负责环境分层、profile 组合、stdin／signal 关闭与进程退出。
 
+配置持久化时，首次使用 `sessionId` 会恢复其持久化产物，只有 id 不存在时才创建；损坏与后端错误仍会导致失败。
+
 Python 客户端提供显式 Harness home，并选择 `sdk` profile 与有序 patch 文件。缺失 home、profile、bundle 或 server 配置项都会明确失败；不存在外部完整配置回退。[Python profile 运行时决策](2026-08-23-python-sdk-dsh-profile-runtime.zh.md)负责该应用接口。
 
 ### 插件解析：VFS 装载真实包树，闭包 manifest（元数据清单）就是部署根目录
@@ -65,6 +67,8 @@ exe 内支持 `dsh-workflow-worker-thread` 与 `dsh-code-runtime-worker-thread`�
 ## 测试
 
 验证面分三层。机制层：`--sea` 链路的实测结论内嵌在「决策」各节（VFS 内 ESM 动态 `import()`、单一 Cordis 实例、明确报错的配置链路、`node:sqlite`、macOS ad-hoc 签名可运行）。SDK 层：完整的无密钥 pytest 套件以 mock 运行时对端覆盖客户端协议、子进程清理、绝对 `cwd` 传递、双载体启动与载体解析；根 CI 在 Python 3.10 上运行全部用例。端到端层：每个平台构建都会把两个 wheel 包安装进 checkout 外的干净 venv，证明版本相同以及已安装模块／可执行文件的位置，再通过默认 SDK 路径、自定义配置、仓库内置的独立 minimal 组合和直接二进制协议，对 mock 端点完成轮次，并校验最终文本与 JSONL。minimal 运行会断言其精确系统提示词与双工具目录，跨调用保留 Bash 状态，并调用编辑器。自定义配置还会通过打包进 VFS 的真实工作线程文件执行 `run_code` 和不启动 agent 的 `workflow`。文件系统搜索场景要求模型通过目标平台的 `-rg` 伴随文件调用 `glob` 与 `grep`。MCP 场景会启动临时外部 stdio server，刻意延迟首次 `tools/list` 响应，随后立即启动第一个 SDK 提示词；该提示词必须看到并调用已发现的工具，从而证明 `initialize` 是真正以 Loader 插件树完全稳定为准的就绪边界，而不是依赖定时 sleep。同一项安装后运行还会经 Python SDK 比较一组检入的 exe 专用快照：无密钥脚本化模型挂载一个会注册工具的 Cordis 插件，从 `run_code` 调用该工具，运行一个直接 spawn 的 subagent 和一个会通过 spawn 启动第二个 subagent 的工作流，随后卸载该插件。该 fixture（测试前置数据）会显式禁用组合包中未使用的 Bash 和本地 skill（技能）发现，使其工具集不依赖仓库外部状态；比较时会规范化 SDK 结果与通知流，以及父会话和两个子会话 JSONL 日志中不透明的消息、agent、工作流运行与会话 ID。可信拉取请求会增加真实提供方双轮文件写入／读取，并要求外部字节、工具调用、已完成原因与持久化日志一致。该 harness 与 ACP 的 `pnpm run test:snapshot` 保持独立，因为二者的协议和构建产物不同。
+
+独立的恢复场景会为同一 id 启动两个 SDK 运行时进程，并对恢复后模型请求中的首条提示词、首个回答与第二条提示词进行快照比较。
 
 
 手工驱动注意：`bin` 将 stdin EOF 视为「客户端已离开」并立即 dispose，生命周期较短的管道会中止进行中的轮次——管道驱动必须保持 stdin 打开，直到轮次结束。

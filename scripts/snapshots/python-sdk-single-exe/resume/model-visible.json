@@ -1,0 +1,16 @@
+{
+  "resumedRequestHistory": [
+    {
+      "role": "user",
+      "text": "Remember this first-process SDK prompt."
+    },
+    {
+      "role": "assistant",
+      "text": "runtime smoke ok"
+    },
+    {
+      "role": "user",
+      "text": "Continue the persisted SDK session after restart."
+    }
+  ]
+}

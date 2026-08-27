@@ -183,6 +183,56 @@ describe('HarnessSdkJsonRpcServer', () => {
     }
   })
 
+  it('resumes a persisted SDK session after a server restart', { timeout: 15_000 }, async () => {
+    const storageDir = await mkdtemp(join(tmpdir(), 'dsh-jsonrpc-resume-'))
+    const llmServer = await mockCompletionServer()
+    vi.stubEnv('DEEPSEEK_API_KEY', 'test-key')
+    vi.stubEnv('DEEPSEEK_BASE_URL', llmServer.url)
+
+    const firstCtx = await makeHarness(storageDir)
+    const firstServer = new HarnessSdkJsonRpcServer(firstCtx, new FakeTransport())
+    try {
+      await firstServer.initialize({
+        cwd: storageDir,
+        provider: 'deepseek-official',
+        model: 'dsagent-model',
+      })
+      await firstServer.prompt({
+        sessionId: 'persisted',
+        contentBlocks: [{ type: 'text', text: 'remember-before-restart' }],
+      })
+      await vi.waitFor(() => { expect(llmServer.requests).toHaveLength(1) })
+    } finally {
+      await firstServer.shutdown()
+      await firstCtx.fiber.dispose()
+    }
+
+    const secondCtx = await makeHarness(storageDir)
+    const secondServer = new HarnessSdkJsonRpcServer(secondCtx, new FakeTransport())
+    try {
+      await secondServer.initialize({
+        cwd: storageDir,
+        provider: 'deepseek-official',
+        model: 'dsagent-model',
+      })
+      await secondServer.prompt({
+        sessionId: 'persisted',
+        contentBlocks: [{ type: 'text', text: 'continue-after-restart' }],
+      })
+      await vi.waitFor(() => { expect(llmServer.requests).toHaveLength(2) })
+
+      const resumedRequest = llmServer.requests[1] as { messages: unknown[] }
+      const messages = JSON.stringify(resumedRequest.messages)
+      expect(messages).toContain('remember-before-restart')
+      expect(messages).toContain('done')
+      expect(messages).toContain('continue-after-restart')
+    } finally {
+      await secondServer.shutdown()
+      await secondCtx.fiber.dispose()
+      await rm(storageDir, { recursive: true, force: true })
+    }
+  })
+
   it('queues overlapping prompts for one session without blocking other sessions', async () => {
     const mainFollowup = vi.fn<Agent['followup']>()
     const mainAgent = ({
@@ -1119,6 +1169,32 @@ describe('HarnessSdkJsonRpcServer', () => {
     expect(sharedHandle.dispose).toHaveBeenCalledOnce()
     expect(retryHandle.dispose).toHaveBeenCalledOnce()
     await expect(server.getOrCreateSession('after-shutdown')).rejects.toThrow('SDK server is shutting down')
+  })
+
+  it('does not replace a persisted session when native resume fails', async () => {
+    const resumeFailure = new Error('persisted session is corrupt')
+    const create = vi.fn<(options: unknown) => Promise<AgentHandle>>()
+    const resume = vi.fn<(options: unknown) => Promise<AgentHandle>>()
+      .mockRejectedValue(resumeFailure)
+    const persistence = {
+      list: vi.fn(async () => [{ id: SessionId('persisted') }]),
+    }
+    const ctx = {
+      on: vi.fn(() => () => undefined),
+      agents: { create, resume, get: () => undefined },
+      get: (name: string) => name === 'sessionPersistence' ? persistence : undefined,
+    } as unknown as Context
+    const server = new HarnessSdkJsonRpcServer(ctx, new FakeTransport()) as unknown as {
+      getOrCreateSession(sessionId: string): Promise<unknown>
+      shutdown(): Promise<Record<string, never>>
+    }
+
+    await expect(server.getOrCreateSession('persisted')).rejects.toBe(resumeFailure)
+    expect(resume).toHaveBeenCalledWith(expect.objectContaining({
+      resumeSessionId: SessionId('persisted'),
+    }))
+    expect(create).not.toHaveBeenCalled()
+    await server.shutdown()
   })
 
   it('resolves a relative cwd before creating the session', async () => {

@@ -86,6 +86,9 @@ RESTART_SECOND_PROMPT = "Complete the second isolated Python SDK process turn."
 RESTART_SECOND_TEXT = "PROCESS_TWO_OK"
 RESTART_FIRST_SESSION_ID = "process-one"
 RESTART_SECOND_SESSION_ID = "process-two"
+RESUME_FIRST_PROMPT = "Remember this first-process SDK prompt."
+RESUME_SECOND_PROMPT = "Continue the persisted SDK session after restart."
+RESUME_SESSION_ID = "resume-smoke"
 SNAPSHOT_PLUGIN_CODE = """\
 return (ctx) => {
   harness.registerTool(ctx, harness.defineTool({
@@ -123,6 +126,10 @@ RESTART_SNAPSHOT_DIRECTORY = (
     Path(__file__).resolve().parent / "snapshots" / "python-sdk-single-exe" / "restart"
 )
 RESTART_SNAPSHOT_FILENAMES = ("result.json", "requests.json", "session.1.jsonl", "session.2.jsonl")
+RESUME_SNAPSHOT_DIRECTORY = (
+    Path(__file__).resolve().parent / "snapshots" / "python-sdk-single-exe" / "resume"
+)
+RESUME_SNAPSHOT_FILENAMES = ("model-visible.json",)
 MCP_SERVER_SCRIPT = """\
 import json
 import os
@@ -711,7 +718,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--scenario",
-        choices=("all", "sdk-default", "sdk-custom", "sdk-minimal", "sdk-fs-search", "sdk-mcp", "sdk-snapshot", "sdk-restart", "sdk-profile-plugin", "sdk-live", "direct"),
+        choices=("all", "sdk-default", "sdk-resume", "sdk-custom", "sdk-minimal", "sdk-fs-search", "sdk-mcp", "sdk-snapshot", "sdk-restart", "sdk-profile-plugin", "sdk-live", "direct"),
         default="all",
     )
     parser.add_argument("--exe", type=Path)
@@ -732,8 +739,8 @@ def main() -> None:
         args.exe = assert_installed_wheel_environment()
     if args.scenario in {"all", "sdk-custom", "sdk-minimal", "sdk-fs-search", "sdk-snapshot", "sdk-restart", "direct"} and args.exe is None:
         parser.error("--exe is required for custom, minimal, snapshot, and direct scenarios")
-    if args.update_snapshots and args.scenario not in {"all", "sdk-minimal", "sdk-snapshot", "sdk-restart"}:
-        parser.error("--update-snapshots requires --scenario sdk-minimal, sdk-snapshot, sdk-restart, or all")
+    if args.update_snapshots and args.scenario not in {"all", "sdk-resume", "sdk-minimal", "sdk-snapshot", "sdk-restart"}:
+        parser.error("--update-snapshots requires --scenario sdk-resume, sdk-minimal, sdk-snapshot, sdk-restart, or all")
     if args.exe is not None and not args.exe.is_file():
         parser.error(f"runtime executable does not exist: {args.exe}")
 
@@ -745,6 +752,8 @@ def main() -> None:
     with MockModel() as model:
         if args.scenario in {"all", "sdk-default"}:
             smoke_sdk_default(model.url)
+        if args.scenario in {"all", "sdk-resume"}:
+            smoke_sdk_resume(model.url, args.update_snapshots)
         if args.scenario in {"all", "sdk-custom"}:
             assert args.exe is not None
             smoke_sdk_custom(model.url, args.exe.resolve())
@@ -943,6 +952,72 @@ def smoke_sdk_default(base_url: str) -> None:
             f"turn_end={safe_turn_end(next((event.get('data', event) for event in reversed(result.events) if event.get('type') == 'turn/end'), {}))!r}"
         )
         assert_zstd_session_log(sessions)
+
+
+def smoke_sdk_resume(base_url: str, update_snapshots: bool) -> None:
+    """Resume one persisted session through two SDK runtime processes."""
+    from deepseek_harness import DeepSeekHarness
+
+    first_request = len(MockModelHandler.requests)
+    with tempfile.TemporaryDirectory(prefix="dsh-sdk-resume-") as temporary:
+        root = Path(temporary).resolve()
+        dsh_home = root / "home"
+        sessions = dsh_home / "sessions"
+        options = {
+            "provider": "deepseek-official",
+            "model": "smoke-model",
+            "cwd": str(root),
+            "dsh_home": str(dsh_home),
+            "env": {
+                "DSH_PERMISSION_MODE": "danger-full-access",
+                "DSH_TELEMETRY_DISABLED": "1",
+            },
+            "api_key": "sk-keyless-smoke",
+            "base_url": base_url,
+            "request_timeout_seconds": 60,
+        }
+        with DeepSeekHarness(**options) as harness:
+            first = harness.run(RESUME_FIRST_PROMPT, session_id=RESUME_SESSION_ID)
+        first_size = sum(path.stat().st_size for path in sessions.rglob("*") if path.is_file())
+        with DeepSeekHarness(**options) as harness:
+            resumed = harness.run(RESUME_SECOND_PROMPT, session_id=RESUME_SESSION_ID)
+        resumed_size = sum(path.stat().st_size for path in sessions.rglob("*") if path.is_file())
+
+        assert first.final_response == EXPECTED_TEXT, first.final_response
+        assert resumed.final_response == EXPECTED_TEXT, resumed.final_response
+        if resumed_size <= first_size:
+            raise AssertionError("native session artifact did not grow after packaged resume")
+        assert_zstd_session_log(sessions)
+        compare_snapshot_files(
+            build_resume_snapshot_files(MockModelHandler.requests[first_request:]),
+            update_snapshots,
+            RESUME_SNAPSHOT_DIRECTORY,
+            RESUME_SNAPSHOT_FILENAMES,
+        )
+
+
+def build_resume_snapshot_files(requests: list[dict[str, object]]) -> dict[str, str]:
+    """Project retained conversation from the second process into stable output."""
+    if len(requests) != 2:
+        raise AssertionError(f"packaged resume emitted {len(requests)} model requests instead of 2")
+    messages = requests[1].get("messages")
+    if not isinstance(messages, list):
+        raise AssertionError("packaged resumed model request has no messages")
+    retained_text = {RESUME_FIRST_PROMPT, EXPECTED_TEXT, RESUME_SECOND_PROMPT}
+    history = [
+        {"role": message.get("role"), "text": text}
+        for message in messages
+        if isinstance(message, dict) and message.get("role") in {"user", "assistant"}
+        for text in [message_text(message.get("content"))]
+        if text in retained_text
+    ]
+    return {
+        "model-visible.json": json.dumps(
+            {"resumedRequestHistory": history},
+            indent=2,
+            ensure_ascii=False,
+        ) + "\n",
+    }
 
 
 def smoke_sdk_custom(base_url: str, executable: Path) -> None:
