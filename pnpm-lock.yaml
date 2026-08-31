@@ -6606,6 +6606,19 @@ importers:
         specifier: workspace:^
         version: link:../../../vendor/cordis
 
+  packages/runtime/broker:
+    dependencies:
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../vendor/schemastery
+        version: link:../../../vendor/schemastery
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:^
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-tools':
+        specifier: workspace:^
+        version: link:../../core/tools
+
   packages/sandbox/sandbox:
     dependencies:
       '@deepseek-ai/dsh-util-values':
@@ -7478,6 +7491,22 @@ importers:
       '@deepseek-ai/dsh-settings':
         specifier: workspace:^
         version: link:../settings
+
+  packages/shell/bash-broker:
+    dependencies:
+      '@deepseek-ai/schemastery':
+        specifier: link:../../../vendor/schemastery
+        version: link:../../../vendor/schemastery
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:^
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-runtime-broker':
+        specifier: workspace:^
+        version: link:../../runtime/broker
+      '@deepseek-ai/dsh-shell':
+        specifier: workspace:^
+        version: link:../shell
 
   packages/shell/bash-local:
     dependencies:
@@ -9720,6 +9749,9 @@ importers:
       '@deepseek-ai/dsh-authorization':
         specifier: workspace:^
         version: link:../../packages/credentials/authorization
+      '@deepseek-ai/dsh-bash-broker':
+        specifier: workspace:^
+        version: link:../../packages/shell/bash-broker
       '@deepseek-ai/dsh-bash-local':
         specifier: workspace:^
         version: link:../../packages/shell/bash-local
@@ -9813,9 +9845,6 @@ importers:
       '@deepseek-ai/dsh-llm-retry':
         specifier: workspace:^
         version: link:../../packages/llm/llm-retry
-      '@deepseek-ai/dsh-mcp-client':
-        specifier: workspace:^
-        version: link:../../packages/mcp/mcp-client
       '@deepseek-ai/dsh-output-retention':
         specifier: workspace:^
         version: link:../../packages/util/output-retention
@@ -9837,6 +9866,9 @@ importers:
       '@deepseek-ai/dsh-repeat-tool-reminder':
         specifier: workspace:^
         version: link:../../packages/guard/repeat-tool-reminder
+      '@deepseek-ai/dsh-runtime-broker':
+        specifier: workspace:^
+        version: link:../../packages/runtime/broker
       '@deepseek-ai/dsh-sandbox':
         specifier: workspace:^
         version: link:../../packages/sandbox/sandbox
