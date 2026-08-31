@@ -6615,6 +6615,9 @@ importers:
       '@deepseek-ai/cordis':
         specifier: workspace:^
         version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-invariants':
+        specifier: workspace:^
+        version: link:../../runtime-diagnostics/invariants
       '@deepseek-ai/dsh-tools':
         specifier: workspace:^
         version: link:../../core/tools
@@ -7501,6 +7504,9 @@ importers:
       '@deepseek-ai/cordis':
         specifier: workspace:^
         version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-invariants':
+        specifier: workspace:^
+        version: link:../../runtime-diagnostics/invariants
       '@deepseek-ai/dsh-runtime-broker':
         specifier: workspace:^
         version: link:../../runtime/broker
