@@ -137,6 +137,24 @@ describe('serializeMessages', () => {
     }])
   })
 
+  it('omits DeepSeek reasoning passback from OpenAI-compatible assistant history', () => {
+    const wire = serializeMessages([
+      createMessage({
+        role: 'assistant',
+        content: [
+          { type: 'reasoning', text: 'provider-private reasoning' },
+          { type: 'tool-call', id: ToolCallId('call-1'), name: 'lookup', arguments: '{}' },
+        ],
+        source: { kind: 'plugin', plugin: 'test' },
+      }),
+    ], { wireDialect: 'openai-compatible' })
+    expect(wire).toEqual([{
+      role: 'assistant',
+      content: '',
+      tool_calls: [{ id: 'call-1', type: 'function', function: { name: 'lookup', arguments: '{}' } }],
+    }])
+  })
+
   it('serializes parallel tool calls in order', () => {
     const wire = serializeMessages([
       createMessage({

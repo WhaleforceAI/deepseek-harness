@@ -1,0 +1,28 @@
+# Strict OpenAI-compatible gateway patch over the shipped headless profile.
+- id: headless-startup
+  disabled: true
+
+- id: headless-runner
+  disabled: true
+
+- id: llm-deepseek
+  config:
+    baseURL: !!js process.env.DSH_SNAPSHOT_BASE_URL
+    wireDialect: openai-compatible
+    streamIdleTimeoutMs: 150
+
+- id: agent-loop
+  config:
+    agents:
+      - id: main
+        provider: deepseek-official
+        model: deepseek-v4-flash
+        cwd: !!js process.cwd()
+
+- id: agent-instructions
+  disabled: true
+
+- id: session-persistence-jsonl
+  config:
+    root: './.sessions'
+    compression: none

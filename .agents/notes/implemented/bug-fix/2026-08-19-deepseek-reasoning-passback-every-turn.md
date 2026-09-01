@@ -14,6 +14,8 @@ That endpoint is not the only one this adapter serves. `Config.baseURL` points i
 
 `serializeAssistant` emits `reasoning_content` for every assistant turn whose content carried reasoning, independent of tool calls. An absent reasoning block still emits no field, so a non-thinking turn is unchanged.
 
+This passback applies to the DeepSeek wire dialect. A strict generic gateway uses the explicit exception recorded in [Explicit OpenAI-compatible DeepSeek wire dialect](2026-09-01-explicit-openai-compatible-deepseek-dialect.md).
+
 The replayed text is byte-exact with what the provider streamed: `translate.ts` accumulates the whole `reasoning_content` channel of one response into a single reasoning block, so the join in `serializeAssistant` concatenates one member and a hash taken over the replay matches a hash taken over the original delivery.
 
 ## Alternatives considered

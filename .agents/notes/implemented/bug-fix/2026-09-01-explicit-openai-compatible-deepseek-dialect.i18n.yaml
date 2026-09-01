@@ -1,0 +1,6 @@
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-09-01-explicit-openai-compatible-deepseek-dialect.md
+2026-09-01-explicit-openai-compatible-deepseek-dialect.md: 347ba1b5c6d27f7b40c5d40e0bc165ad65f06a56
+2026-09-01-explicit-openai-compatible-deepseek-dialect.zh.md: 0232c2491456d01cecc73be7c1d72cbf51b09b6a

@@ -78,7 +78,7 @@ export { DeepSeekFileId } from './file-id.ts'
 export type { DeepSeekFileId as DeepSeekFileIdType } from './file-id.ts'
 export { DeepSeekUploadIndex, deepSeekFileScope } from './upload-index.ts'
 export type { DeepSeekUploadRecord } from './upload-index.ts'
-export type { RequestDefaults } from './serialize.ts'
+export type { DeepSeekWireDialect, RequestDefaults, ResolvedRequestDefaults } from './serialize.ts'
 export type * from './types.ts'
 
 export const name = 'llm-deepseek'
@@ -119,17 +119,20 @@ const MODEL_MODALITIES = ['text', 'image'] as const satisfies readonly ModelModa
  * as the `llm-deepseek` settings-section shape. Every field is optional in
  * yml: a missing API key resolves through {@link Config.apiKeyEnv} at each
  * request (a request without any key fails with `MISSING_CREDENTIAL`, not at
- * plugin load), omitted thinking mode uses the provider default, and omitted
- * reasoning effort resolves to `high`.
+ * plugin load). The omitted wire dialect uses DeepSeek semantics, where an
+ * omitted thinking mode uses the provider default and omitted reasoning
+ * effort resolves to `high`.
  */
 export interface Config {
   /** Credential reference (environment-variable name) resolved per request; defaults to `DEEPSEEK_API_KEY`. */
   apiKeyEnv?: string
   /** Endpoint base; falls back to $DEEPSEEK_BASE_URL from a trusted environment layer, then the public API. */
   baseURL?: string
-  /** Deployment thinking policy; `disabled` limits every conversation request to `off`. */
+  /** Request dialect; `openai-compatible` omits DeepSeek reasoning controls and publishes no reasoning efforts. */
+  wireDialect?: 'deepseek' | 'openai-compatible'
+  /** DeepSeek-dialect thinking policy; `disabled` limits every conversation request to `off`. */
   thinking?: 'enabled' | 'disabled'
-  /** Default thinking effort (default `high`); `off` disables thinking per request. */
+  /** DeepSeek-dialect thinking effort (default `high`); `off` disables thinking per request. */
   reasoningEffort?: 'off' | 'low' | 'high' | 'max'
   /** Default per-request output cap (default 256,000); a model's own cap and explicit request values win. */
   maxTokens?: number
@@ -177,6 +180,7 @@ const catalogModel: z<DeepSeekCatalogModel> = z.object({
 export const Config: z<Config> = z.object({
   apiKeyEnv: z.string().role('credential-ref').default(DEFAULT_API_KEY_ENV),
   baseURL: z.string(),
+  wireDialect: z.union(['deepseek', 'openai-compatible']).default('deepseek'),
   thinking: z.union(['enabled', 'disabled']),
   reasoningEffort: z.union(['off', 'low', 'high', 'max']),
   maxTokens: z.number().step(1).min(1).max(Number.MAX_SAFE_INTEGER).default(DEFAULT_MAX_TOKENS),
@@ -292,6 +296,11 @@ function resolveModels(models: readonly DeepSeekCatalogModel[] | undefined): Dee
  * @returns validated connection facts plus the credential reference.
  */
 export function resolveAdapterOptions(config: Config, environment?: LaunchEnvironmentSnapshot): ResolvedDeepSeekOptions {
+  const wireDialect = config.wireDialect ?? 'deepseek'
+  if (wireDialect === 'openai-compatible'
+    && (config.thinking !== undefined || config.reasoningEffort !== undefined)) {
+    throw new Error('llm-deepseek: openai-compatible wireDialect does not accept thinking or reasoningEffort')
+  }
   if (config.thinking === 'disabled'
     && config.reasoningEffort !== undefined
     && config.reasoningEffort !== 'off') {
@@ -379,6 +388,7 @@ export function resolveAdapterOptions(config: Config, environment?: LaunchEnviro
       ?? environment?.get(BASE_URL_ENV)?.value
       ?? PUBLIC_BASE_URL,
     defaults: {
+      wireDialect,
       thinking: config.thinking,
       reasoningEffort: config.reasoningEffort,
     },

@@ -18,10 +18,19 @@ import type {
   WireUserContentPart,
 } from './types.ts'
 
+/** Provider request dialect selected by the deployment endpoint. */
+export type DeepSeekWireDialect = 'deepseek' | 'openai-compatible'
+
 /** Adapter-level request defaults (from plugin config). */
 export interface RequestDefaults {
+  wireDialect?: DeepSeekWireDialect | undefined
   thinking?: 'enabled' | 'disabled' | undefined
   reasoningEffort?: 'off' | 'low' | 'high' | 'max' | undefined
+}
+
+/** Request defaults after deployment configuration resolution. */
+export interface ResolvedRequestDefaults extends RequestDefaults {
+  wireDialect: DeepSeekWireDialect
 }
 
 interface ResolvedThinking {
@@ -81,6 +90,7 @@ function reasoningEffort(effort: NonNullable<GenerateOptions['reasoningEffort']>
 
 /** Resolve one legal thinking/effort pair without exposing `off` as a wire effort. */
 function resolveThinking(options: GenerateOptions, defaults: RequestDefaults): ResolvedThinking {
+  if (defaults.wireDialect === 'openai-compatible') return {}
   if (options.purpose === 'session-title') return { thinking: 'disabled' }
   const effort = options.reasoningEffort === undefined
     ? defaults.reasoningEffort
@@ -200,7 +210,7 @@ function userContent(parts: readonly WireUserContentPart[]): string | WireUserCo
 }
 
 /** Serialize one assistant message (text + reasoning + tool calls). */
-function serializeAssistant(message: Message): WireMessage {
+function serializeAssistant(message: Message, wireDialect: DeepSeekWireDialect): WireMessage {
   const text = flattenText(message.content)
   const reasoning = message.content
     .filter(block => block.type === 'reasoning')
@@ -230,7 +240,7 @@ function serializeAssistant(message: Message): WireMessage {
     // elsewhere; a gateway re-encoding the conversation for another vendor
     // recovers that turn's upstream thinking signature by hashing this exact
     // text, which a tool-call-free turn carries nowhere else.
-    ...reasoning.length > 0 ? { reasoning_content: reasoning } : {},
+    ...wireDialect === 'deepseek' && reasoning.length > 0 ? { reasoning_content: reasoning } : {},
     ...toolCalls.length > 0 ? { tool_calls: toolCalls } : {},
   }
 }
@@ -241,9 +251,11 @@ function serializeAssistant(message: Message): WireMessage {
  * user-role message, so a mixed user message contributes its text first and
  * its tool results as separate wire messages after.
  * @param messages - the harness conversation, in order.
+ * @param defaults - deployment wire dialect; omission preserves DeepSeek passback semantics.
  * @returns the wire messages; order preserved, each tool result expanded into its own entry.
  */
-export function serializeMessages(messages: Message[]): WireMessage[] {
+export function serializeMessages(messages: Message[], defaults: RequestDefaults = {}): WireMessage[] {
+  const wireDialect = defaults.wireDialect ?? 'deepseek'
   const wire: WireMessage[] = []
   for (const message of messages) {
     assertTextOnly(message.content)
@@ -252,7 +264,7 @@ export function serializeMessages(messages: Message[]): WireMessage[] {
       continue
     }
     if (message.role === 'assistant') {
-      wire.push(serializeAssistant(message))
+      wire.push(serializeAssistant(message, wireDialect))
       continue
     }
     // user role: tool results ride in user messages in the harness
@@ -280,12 +292,15 @@ export function serializeMessages(messages: Message[]): WireMessage[] {
  * user message containing their images.
  * @param messages - transient request history after request-size offloading.
  * @param images - prepared request versions, one provider representation, and its budget.
+ * @param defaults - deployment wire dialect; omission preserves DeepSeek passback semantics.
  * @returns ordered DeepSeek wire messages.
  */
 export async function serializeMessagesWithImages(
   messages: readonly Message[],
   images: ImageSerializationOptions,
+  defaults: RequestDefaults = {},
 ): Promise<WireMessage[]> {
+  const wireDialect = defaults.wireDialect ?? 'deepseek'
   assertSupportedImageRoles(messages)
   const wire: WireMessage[] = []
   let pendingToolImages: WireImageContentPart[] = []
@@ -307,7 +322,7 @@ export async function serializeMessagesWithImages(
     }
     if (message.role === 'assistant') {
       flushToolImages()
-      wire.push(serializeAssistant(message))
+      wire.push(serializeAssistant(message, wireDialect))
       continue
     }
 
@@ -386,7 +401,7 @@ export function serializeRequest(
   if (options.system !== undefined) {
     messages.push({ role: 'system', content: options.system })
   }
-  messages.push(...serializeMessages(options.messages))
+  messages.push(...serializeMessages(options.messages, defaults))
 
   return requestWithMessages(options, messages, defaults)
 }
@@ -425,6 +440,6 @@ export async function serializeRequestWithImages(
   if (options.system !== undefined) {
     messages.push({ role: 'system', content: options.system })
   }
-  messages.push(...await serializeMessagesWithImages(requestMessages, images))
+  messages.push(...await serializeMessagesWithImages(requestMessages, images, defaults))
   return requestWithMessages(options, messages, defaults)
 }

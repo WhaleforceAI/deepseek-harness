@@ -6,7 +6,8 @@ import { Context } from '@deepseek-ai/cordis'
 import { AttachmentId, ImageVariantId } from '@deepseek-ai/dsh-attachment'
 import type { AttachmentStore, ImageAttachmentRef, RequestImageAttachment } from '@deepseek-ai/dsh-attachment'
 import { createLaunchEnvironmentSnapshot } from '@deepseek-ai/dsh-launch-environment'
-import LlmRuntime, { ToolCallId, createUserMessage,
+import LlmRuntime, { BlockAssembler, ToolCallId, createUserMessage,
+  createToolResultMessage,
   CONTEXT_WINDOW_EXCEEDED_CODE,
   LlmError,
   ProviderRequestId,
@@ -364,6 +365,215 @@ describe('DeepSeekAdapter against a mock server', () => {
     expect(server.headers[0]).not.toHaveProperty('x-openrouter-title')
     expect(server.headers[0]).not.toHaveProperty('x-openrouter-categories')
     expect(server.headers[0]).not.toHaveProperty('x-deepseek-harness-compact')
+  })
+
+  it('streams a strict OpenAI-compatible tool round trip without DeepSeek reasoning fields', async () => {
+    const server = await mockServer([
+      {
+        kind: 'sse',
+        events: [
+          JSON.stringify({
+            id: 'chatcmpl-tool',
+            object: 'chat.completion.chunk',
+            created: 1,
+            model: 'gateway-model',
+            choices: [{
+              index: 0,
+              delta: {
+                role: 'assistant',
+                tool_calls: [{
+                  index: 0,
+                  id: 'call_gateway',
+                  type: 'function',
+                  function: { name: 'lookup', arguments: '{"ticker":"WFC"}' },
+                }],
+              },
+              finish_reason: null,
+            }],
+          }),
+          JSON.stringify({
+            id: 'chatcmpl-tool',
+            object: 'chat.completion.chunk',
+            created: 1,
+            model: 'gateway-model',
+            choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }],
+            usage: { prompt_tokens: 8, completion_tokens: 3 },
+          }),
+          '[DONE]',
+        ],
+      },
+      {
+        kind: 'sse',
+        events: [
+          JSON.stringify({
+            id: 'chatcmpl-final',
+            object: 'chat.completion.chunk',
+            created: 2,
+            model: 'gateway-model',
+            choices: [{
+              index: 0,
+              delta: { role: 'assistant', content: 'hello' },
+              finish_reason: null,
+            }],
+          }),
+          JSON.stringify({
+            id: 'chatcmpl-final',
+            object: 'chat.completion.chunk',
+            created: 2,
+            model: 'gateway-model',
+            choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+            usage: { prompt_tokens: 12, completion_tokens: 1 },
+          }),
+          '[DONE]',
+        ],
+      },
+    ])
+    const ctx = await harness(server.url, { wireDialect: 'openai-compatible' })
+    const prompt = createUserMessage({
+      content: [{ type: 'text', text: 'Look up WFC.' }],
+      source: { kind: 'plugin', plugin: 'test' },
+    })
+    const tool = {
+      name: 'lookup',
+      description: 'Look up one ticker.',
+      parameters: {
+        type: 'object' as const,
+        properties: { ticker: { type: 'string' } },
+        required: ['ticker'],
+      },
+    }
+
+    const model = await ctx.llm.resolveModelInfo('deepseek-official', 'gateway-model')
+    const firstAssembler = new BlockAssembler()
+    const firstChunks = []
+    for await (const chunk of ctx.llm.stream({
+      provider: 'deepseek-official',
+      model: 'gateway-model',
+      messages: [prompt],
+      tools: [tool],
+    })) {
+      firstChunks.push(chunk)
+      firstAssembler.push(chunk)
+    }
+    const firstMessage = firstAssembler.message({
+      kind: 'model',
+      provider: 'deepseek-official',
+      model: 'gateway-model',
+    })
+    const call = firstMessage.content.find(block => block.type === 'tool-call')
+    expect(model).not.toHaveProperty('reasoning')
+    expect(firstChunks).toEqual([
+      { type: 'block-start', index: 0, blockType: 'tool-call' },
+      {
+        type: 'tool-call-delta',
+        index: 0,
+        id: 'call_gateway',
+        name: 'lookup',
+        argumentsDelta: '{"ticker":"WFC"}',
+      },
+      {
+        type: 'block-end',
+        index: 0,
+        block: {
+          type: 'tool-call',
+          id: 'call_gateway',
+          name: 'lookup',
+          arguments: '{"ticker":"WFC"}',
+        },
+      },
+      { type: 'usage', usage: { inputTokens: 8, outputTokens: 3 } },
+      { type: 'finish', reason: { kind: 'tool-calls' } },
+    ])
+    expect(call).toEqual({
+      type: 'tool-call',
+      id: ToolCallId('call_gateway'),
+      name: 'lookup',
+      arguments: '{"ticker":"WFC"}',
+    })
+
+    const secondAssembler = new BlockAssembler()
+    const secondChunks = []
+    for await (const chunk of ctx.llm.stream({
+      provider: 'deepseek-official',
+      model: 'gateway-model',
+      messages: [
+        prompt,
+        firstMessage,
+        createToolResultMessage({
+          callId: ToolCallId('call_gateway'),
+          content: [{ type: 'text', text: '{"price":81}' }],
+          isError: false,
+        }),
+      ],
+      tools: [tool],
+    })) {
+      secondChunks.push(chunk)
+      secondAssembler.push(chunk)
+    }
+    expect(secondChunks).toEqual([
+      { type: 'block-start', index: 0, blockType: 'text' },
+      { type: 'text-delta', index: 0, text: 'hello' },
+      { type: 'block-end', index: 0, block: { type: 'text', text: 'hello' } },
+      { type: 'usage', usage: { inputTokens: 12, outputTokens: 1 } },
+      { type: 'finish', reason: { kind: 'stop' } },
+    ])
+    expect(secondAssembler.message().content).toEqual([{ type: 'text', text: 'hello' }])
+
+    expect(server.requests).toHaveLength(2)
+    for (const request of server.requests) {
+      expect(request).not.toHaveProperty('thinking')
+      expect(request).not.toHaveProperty('reasoning_effort')
+    }
+    expect(server.requests[0]).toEqual({
+      model: 'gateway-model',
+      messages: [{ role: 'user', content: 'Look up WFC.' }],
+      tools: [{
+        type: 'function',
+        function: {
+          name: 'lookup',
+          description: 'Look up one ticker.',
+          parameters: {
+            type: 'object',
+            properties: { ticker: { type: 'string' } },
+            required: ['ticker'],
+          },
+        },
+      }],
+      max_tokens: 256_000,
+      stream: true,
+      stream_options: { include_usage: true },
+    })
+    expect(server.requests[1]).toEqual({
+      model: 'gateway-model',
+      messages: [
+        { role: 'user', content: 'Look up WFC.' },
+        {
+          role: 'assistant',
+          content: '',
+          tool_calls: [{
+            id: 'call_gateway',
+            type: 'function',
+            function: { name: 'lookup', arguments: '{"ticker":"WFC"}' },
+          }],
+        },
+        { role: 'tool', tool_call_id: 'call_gateway', content: '{"price":81}' },
+      ],
+      tools: [{
+        type: 'function',
+        function: {
+          name: 'lookup',
+          description: 'Look up one ticker.',
+          parameters: {
+            type: 'object',
+            properties: { ticker: { type: 'string' } },
+            required: ['ticker'],
+          },
+        },
+      }],
+      max_tokens: 256_000,
+      stream: true,
+      stream_options: { include_usage: true },
+    })
   })
 
   it('uploads a durable image once and sends only its Files API id to the vision model', async () => {
@@ -1804,6 +2014,16 @@ describe('plugin registration and config', () => {
         .toThrow(/only reasoningEffort "off"/)
     },
   )
+
+  it.each([
+    { thinking: 'enabled' as const },
+    { reasoningEffort: 'high' as const },
+  ])('rejects DeepSeek-only reasoning config for an OpenAI-compatible gateway', (reasoning) => {
+    expect(() => resolveAdapterOptions({
+      wireDialect: 'openai-compatible',
+      ...reasoning,
+    })).toThrow(/openai-compatible wireDialect does not accept thinking or reasoningEffort/)
+  })
 
   it('accepts disabled thinking with off at the resolver boundary', async () => {
     const adapter = adapterOf({ thinking: 'disabled', reasoningEffort: 'off' })

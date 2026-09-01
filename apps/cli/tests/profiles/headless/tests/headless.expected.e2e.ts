@@ -39,6 +39,7 @@ const dshBinScript = fileURLToPath(new URL('../../../../src/bin.ts', import.meta
 const tsconfigPath = fileURLToPath(new URL('../../../../../../tsconfig.json', import.meta.url))
 const reasoningConfigPath = fileURLToPath(new URL('./fixtures/cli.patch.yml', import.meta.url))
 const deepseekDefaultsConfigPath = fileURLToPath(new URL('./fixtures/deepseek-defaults.patch.yml', import.meta.url))
+const openAICompatibleConfigPath = fileURLToPath(new URL('./fixtures/openai-compatible-gateway.patch.yml', import.meta.url))
 const piAiDefaultsConfigPath = fileURLToPath(new URL('./fixtures/pi-ai-defaults.patch.yml', import.meta.url))
 const headlessOverlayPath = fileURLToPath(new URL('./fixtures/headless-profile.patch.yml', import.meta.url))
 const headlessSessionExpected = join(goldensDir, 'headless-profile', 'session.expected.jsonl')
@@ -61,15 +62,29 @@ interface DeepSeekDefaultsServer {
   close(): Promise<void>
 }
 
+function containsDeepSeekReasoningField(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(containsDeepSeekReasoningField)
+  if (value === null || typeof value !== 'object') return false
+  const record = value as JsonObject
+  if (['reasoning_content', 'reasoning_effort', 'thinking'].some(field => field in record)) return true
+  return Object.values(record).some(containsDeepSeekReasoningField)
+}
+
 /** Serve one deterministic DeepSeek-compatible response while retaining its request body. */
-async function deepseekDefaultsServer(): Promise<DeepSeekDefaultsServer> {
+async function deepseekDefaultsServer(strictOpenAICompatible = false): Promise<DeepSeekDefaultsServer> {
   const requests: JsonObject[] = []
   const server = createServer((request: IncomingMessage, response: ServerResponse) => {
     let body = ''
     request.setEncoding('utf8')
     request.on('data', (chunk: string) => { body += chunk })
     request.on('end', () => {
-      requests.push(JSON.parse(body) as JsonObject)
+      const parsed = JSON.parse(body) as JsonObject
+      requests.push(parsed)
+      if (strictOpenAICompatible && containsDeepSeekReasoningField(parsed)) {
+        response.writeHead(400, { 'content-type': 'application/json' })
+        response.end('{"error":{"message":"DeepSeek reasoning field rejected"}}')
+        return
+      }
       response.writeHead(200, { 'content-type': 'text/event-stream' })
       let keepAlives = 3
       const write = (): void => {
@@ -472,6 +487,49 @@ describe('headless stream-json snapshots', () => {
         maxTokens: true,
         reasoningEffort: true,
       })
+    } finally {
+      await server.close()
+    }
+  }, LOADER_SMOKE_TEST_TIMEOUT_MS)
+
+  it('loads a strict OpenAI-compatible DeepSeek route without reasoning fields', async () => {
+    const server = await deepseekDefaultsServer(true)
+    try {
+      const result = await runLoaderSmoke({
+        label: 'strict OpenAI-compatible DeepSeek headless snapshot',
+        tempDirPrefix: 'headless-snapshot-openai-compatible-',
+        binScript,
+        libBinScript: binScript,
+        configPath: openAICompatibleConfigPath,
+        binArgs: [openAICompatibleConfigPath, 'return the deterministic response'],
+        tsconfigPath,
+        env: {
+          DEEPSEEK_API_KEY: 'snapshot-key',
+          DSH_SNAPSHOT_BASE_URL: server.url,
+          NODE_OPTIONS: [process.env.NODE_OPTIONS, '--disable-warning=ExperimentalWarning'].filter(Boolean).join(' '),
+        },
+      })
+
+      expect(result.stderr).toBe('')
+      expect(server.requests).toHaveLength(2)
+      expect(server.requests.every(request => !containsDeepSeekReasoningField(request))).toBe(true)
+      const header = (parseJsonl(result.stdout)
+        .map(record => record.event)
+        .find((event): event is JsonObject => (
+          event !== null
+          && typeof event === 'object'
+          && !Array.isArray(event)
+          && 'type' in event
+          && event.type === 'request/header'
+        ))?.data as JsonObject | undefined)?.header as JsonObject | undefined
+      expect(header?.config).toMatchInlineSnapshot(`
+        {
+          "maxTokens": 256000,
+          "model": "deepseek-v4-flash",
+          "provider": "deepseek-official",
+        }
+      `)
+      expect(header?.adapterDefaults).toEqual({ maxTokens: true })
     } finally {
       await server.close()
     }

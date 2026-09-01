@@ -14,6 +14,8 @@ Status: implemented
 
 `serializeAssistant` 对每个内容携带推理的 assistant 轮次都发出 `reasoning_content`，与是否有工具调用无关。没有推理块时仍然不发出该字段，因此非思考轮次的行为不变。
 
+这项回传适用于 DeepSeek 协议方言。严格的通用网关采用[显式 OpenAI 兼容 DeepSeek 协议方言](2026-09-01-explicit-openai-compatible-deepseek-dialect.zh.md)所记录的明确例外。
+
 回放文本与提供方流式下发的内容逐字一致：`translate.ts` 会把一次响应的整个 `reasoning_content` 通道累积进单个推理块，因此 `serializeAssistant` 中的拼接只连接一个成员，对回放取的哈希与对原始下发取的哈希相同。
 
 ## Alternatives considered
