@@ -481,7 +481,7 @@ describe('DeepSeekAdapter against a mock server', () => {
           arguments: '{"ticker":"WFC"}',
         },
       },
-      { type: 'usage', usage: { inputTokens: 8, outputTokens: 3 } },
+      { type: 'usage', usage: { inputTokens: 8, outputTokens: 3, totalTokens: 11 } },
       { type: 'finish', reason: { kind: 'tool-calls' } },
     ])
     expect(call).toEqual({
@@ -514,7 +514,7 @@ describe('DeepSeekAdapter against a mock server', () => {
       { type: 'block-start', index: 0, blockType: 'text' },
       { type: 'text-delta', index: 0, text: 'hello' },
       { type: 'block-end', index: 0, block: { type: 'text', text: 'hello' } },
-      { type: 'usage', usage: { inputTokens: 12, outputTokens: 1 } },
+      { type: 'usage', usage: { inputTokens: 12, outputTokens: 1, totalTokens: 13 } },
       { type: 'finish', reason: { kind: 'stop' } },
     ])
     expect(secondAssembler.message().content).toEqual([{ type: 'text', text: 'hello' }])

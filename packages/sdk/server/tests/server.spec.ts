@@ -1204,7 +1204,11 @@ describe('HarnessSdkJsonRpcServer', () => {
     const ctx = {
       on: vi.fn(() => () => undefined),
       agents: { create, get: () => undefined },
-      get: () => ({ listProviders: () => [{ id: 'mock', name: 'Mock' }], resolveCallConfig }),
+      // Key-aware like the sibling stub above: this path also consults
+      // `sessionPersistence`, and an absent one must fall through to create.
+      get: (name: string) => name === 'sessionPersistence'
+        ? undefined
+        : ({ listProviders: () => [{ id: 'mock', name: 'Mock' }], resolveCallConfig }),
     } as unknown as Context
     const server = new HarnessSdkJsonRpcServer(ctx, new FakeTransport()) as unknown as {
       initialize(params: { cwd: string; provider: string; model: string; reasoningEffort?: string; maxTokens?: number }): Promise<unknown>

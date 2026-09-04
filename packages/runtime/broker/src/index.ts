@@ -33,7 +33,7 @@ export const Config: z<Config> = z.object({
     inputSchema: z.any(),
     outputLimitBytes: z.number(),
   })).default([]),
-}) as z<Config>
+})
 
 type BridgeResponse =
   | { id: string; ok: true; result: unknown }
@@ -61,15 +61,15 @@ export class BrokerBridge {
         if (error !== undefined) reject(error)
         else resolve(result)
       }
-      const abort = (): void => finish(new Error('runtime-broker: invocation aborted'))
+      const abort = (): void => { finish(new Error('runtime-broker: invocation aborted')) }
       if (signal?.aborted === true) {
         abort()
         return
       }
       signal?.addEventListener('abort', abort, { once: true })
 
-      socket.setTimeout(125_000, () => finish(new Error('runtime-broker: invocation timed out')))
-      socket.on('error', () => finish(new Error('runtime-broker: bridge unavailable')))
+      socket.setTimeout(125_000, () => { finish(new Error('runtime-broker: invocation timed out')) })
+      socket.on('error', () => { finish(new Error('runtime-broker: bridge unavailable')) })
       socket.on('connect', () => {
         socket.write(JSON.stringify({ id, secret: this.config.secret, tool, arguments: args }) + '\n')
       })
@@ -83,8 +83,8 @@ export class BrokerBridge {
         if (newline < 0) return
         try {
           const response = JSON.parse(body.slice(0, newline)) as BridgeResponse
-          if (response.id !== id || response.ok !== true) {
-            const code = response.ok === false ? response.error.code : 'bridge_response_invalid'
+          if (response.id !== id || !response.ok) {
+            const code = response.ok ? 'bridge_response_invalid' : response.error.code
             finish(new Error('runtime-broker: ' + code))
             return
           }
@@ -109,9 +109,11 @@ export function apply(ctx: Context, config: Config): void {
       parameters: tool.inputSchema,
       output: {
         schema: { type: 'object' },
+        // JSON.stringify returns undefined for a top-level `undefined`; the
+        // bridge only ever yields JSON-parsed values, so that is the one case.
         render: (_args: unknown, value: unknown) => [{
           type: 'text',
-          text: JSON.stringify(value) ?? 'null',
+          text: value === undefined ? 'null' : JSON.stringify(value),
         }],
       },
       timeoutMs: 120_000,

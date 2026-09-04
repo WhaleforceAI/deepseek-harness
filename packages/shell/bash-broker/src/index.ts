@@ -47,7 +47,7 @@ function resultObject(value: unknown): ExecResult {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new Error('bash-broker: invalid execution response')
   }
-  return value as ExecResult
+  return value
 }
 
 function confinedWorkdir(value: string | undefined): string {
