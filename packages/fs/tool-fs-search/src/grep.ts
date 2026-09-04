@@ -1,7 +1,7 @@
 /**
  * The model-facing `grep` tool: search file contents with a ripgrep regular
- * expression. Execution spawns the packaged ripgrep binary
- * (`@vscode/ripgrep`) directly through the subprocess seam with a plain argv
+ * expression. Execution spawns the configured or packaged ripgrep binary
+ * (`@vscode/ripgrep`) through the subprocess seam with a plain argv
  * vector using a fixed line-oriented `rg --json` command so file path, line
  * number, and line text parse without colon-splitting ambiguity — this module
  * owns the model-facing schema, argument validation, argv construction,
@@ -36,6 +36,8 @@ export const GREP_MAX_LINE_BYTES = 2000
 
 /** Resolved grep-tool caps — plugin config after defaulting (see `Config` in index.ts). */
 export interface GrepToolCaps {
+  /** Ripgrep executable to spawn verbatim; omitted resolves the packaged binary. */
+  ripgrepPath?: string
   /** Max flat matches retained inline; later matches go to the formatted spill file. */
   maxMatches: number
   /** Max bytes retained per matched-line preview. */
@@ -318,7 +320,7 @@ export function applyGrepTool(ctx: Context, caps: GrepToolCaps): void {
     },
     async execute(args, exec) {
       const input = parseGrepArgs(args)
-      const run = await runRipgrep(ctx, exec, 'grep', buildGrepCommand(input), caps.rawOutputMaxBytes, caps.graceMs, caps.stderrMaxBytes)
+      const run = await runRipgrep(ctx, exec, 'grep', buildGrepCommand(input), caps.rawOutputMaxBytes, caps.graceMs, caps.stderrMaxBytes, caps.ripgrepPath)
       if (run.noMatches) return { matches: [] }
 
       const all: GrepMatch[] = []

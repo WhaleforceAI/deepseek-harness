@@ -232,6 +232,12 @@
       // aliases below cannot map it; it stays hand-written like the sdk/ three.
       "@deepseek-ai/dsh-runtime-broker": ["./packages/runtime/broker/src"],
       "@deepseek-ai/dsh-runtime-broker/invariant": ["./packages/runtime/broker/src/invariant.ts"],
+      // Fork-private runtime providers stay beside the bridge and keep explicit
+      // aliases outside the generated upstream package map.
+      "@deepseek-ai/dsh-fs-broker": ["./packages/runtime/fs-broker/src"],
+      "@deepseek-ai/dsh-fs-broker/invariant": ["./packages/runtime/fs-broker/src/invariant.ts"],
+      "@deepseek-ai/dsh-subprocess-broker": ["./packages/runtime/subprocess-broker/src"],
+      "@deepseek-ai/dsh-subprocess-broker/invariant": ["./packages/runtime/subprocess-broker/src/invariant.ts"],
       // BEGIN generated package aliases — pnpm run gen-tsconfig-paths
       "@deepseek-ai/dsh-acp": ["./packages/acp/acp/src"],
       "@deepseek-ai/dsh-acp-app": ["./packages/bundle/acp-app/src"],
@@ -251,8 +257,6 @@
       "@deepseek-ai/dsh-authorization": ["./packages/credentials/authorization/src"],
       "@deepseek-ai/dsh-authorization/invariant": ["./packages/credentials/authorization/src/invariant.ts"],
       "@deepseek-ai/dsh-base": ["./packages/bundle/base/src"],
-      "@deepseek-ai/dsh-bash-broker": ["./packages/shell/bash-broker/src"],
-      "@deepseek-ai/dsh-bash-broker/invariant": ["./packages/shell/bash-broker/src/invariant.ts"],
       "@deepseek-ai/dsh-bash-local": ["./packages/shell/bash-local/src"],
       "@deepseek-ai/dsh-bash-sandbox": ["./packages/shell/bash-sandbox/src"],
       "@deepseek-ai/dsh-brand": ["./packages/util/brand/src"],

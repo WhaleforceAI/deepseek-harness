@@ -1,8 +1,7 @@
 /**
  * The model-facing filesystem discovery tool suite (`glob`, `grep`) over the
- * packaged ripgrep binary (`@vscode/ripgrep`). This single plugin registers
- * both tools; the binary ships inside the npm dependency, so no system `rg`
- * install and no shell layer is involved.
+ * configured or packaged ripgrep binary (`@vscode/ripgrep`). This single
+ * plugin registers both tools; no shell layer is involved.
  *
  * ## Spawn-backed, not a `ctx.fs` provider method
  *
@@ -73,6 +72,8 @@ export const inject = ['tools', 'systemPrompt', 'subprocess']
 export interface Config {
   /** Whether an over-cap `glob` page is sampled across top-level entries instead of taking the modification-time head. */
   sampleOverCapGlobResults: boolean
+  /** Ripgrep executable to spawn verbatim; omitted resolves the packaged `@vscode/ripgrep` binary. */
+  ripgrepPath?: string
   /** Max paths one `glob` call retains inline; later paths go to the formatted spill file. */
   globMaxResults?: number
   /** Max flat matches one `grep` call retains inline; later matches go to the formatted spill file. */
@@ -96,6 +97,7 @@ export interface Config {
 
 export const Config: z<Config> = z.object({
   sampleOverCapGlobResults: z.boolean().required(),
+  ripgrepPath: z.string(),
   globMaxResults: z.number().default(GLOB_MAX_RESULTS),
   grepMaxMatches: z.number().default(GREP_MAX_MATCHES),
   grepMaxLineBytes: z.number().default(GREP_MAX_LINE_BYTES),
@@ -106,8 +108,8 @@ export const Config: z<Config> = z.object({
   timeoutMs: z.number().default(SEARCH_TIMEOUT_MS),
 })
 
-/** The shape after schemastery applied the defaults. */
-type ResolvedConfig = Required<Config>
+/** The shape after schemastery applied the numeric defaults. */
+type ResolvedConfig = Required<Omit<Config, 'ripgrepPath'>> & Pick<Config, 'ripgrepPath'>
 
 /** Every search cap counts items/bytes/milliseconds — a positive integer, or retention and timeout arithmetic misbehaves silently. */
 function assertPositiveInteger(name: string, value: number): void {
@@ -118,8 +120,8 @@ function assertPositiveInteger(name: string, value: number): void {
 
 /**
  * Register the `glob`/`grep` filesystem discovery tool suite. The packaged
- * ripgrep binary is always available (an npm dependency), so registration is
- * unconditional.
+ * ripgrep binary defaults to the bundled dependency and can be replaced by
+ * one deployment-supplied executable name or path.
  *
  * @param ctx - plugin context; registrations are effects scoped to this plugin.
  * @param config - resolved plugin configuration from schemastery.
@@ -141,6 +143,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
   assertPositiveInteger('timeoutMs', resolved.timeoutMs)
   applyGlobTool(ctx, {
     sampleOverCapGlobResults: resolved.sampleOverCapGlobResults,
+    ...resolved.ripgrepPath === undefined ? {} : { ripgrepPath: resolved.ripgrepPath },
     maxResults: resolved.globMaxResults,
     maxMetaBytes: resolved.searchMetaMaxBytes,
     rawOutputMaxBytes: resolved.rawOutputMaxBytes,
@@ -149,6 +152,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
     timeoutMs: resolved.timeoutMs,
   })
   applyGrepTool(ctx, {
+    ...resolved.ripgrepPath === undefined ? {} : { ripgrepPath: resolved.ripgrepPath },
     maxMatches: resolved.grepMaxMatches,
     maxLineBytes: resolved.grepMaxLineBytes,
     maxMetaBytes: resolved.searchMetaMaxBytes,

@@ -1,18 +1,18 @@
-/** Package-owned invariant companion for the broker-backed shell provider. */
+/** Package-owned invariant companion for the broker-backed filesystem provider. */
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { InvariantInstaller } from '@deepseek-ai/dsh-invariants'
 
-const PACKAGE_NAME = '@deepseek-ai/dsh-bash-broker'
+const PACKAGE_NAME = '@deepseek-ai/dsh-fs-broker'
 
 /** Cordis companion plugin name. */
-export const name = 'bash-broker-invariant'
+export const name = 'fs-broker-invariant'
 /** Service required before the companion can reserve package ownership. */
 export const inject = ['invariants']
 
 /**
- * No runtime invariant: ShellExecutor owns process lifecycle invariants while
- * this provider enforces confinement and bounded broker protocol conversion.
+ * No runtime invariant: the provider validates broker data at the transport
+ * boundary, while the broker owns filesystem publication.
  */
 const install: InvariantInstaller = () => {}
 

@@ -9,8 +9,9 @@
     { "path": "../../../vendor/cosmokit" },
     { "path": "../../../vendor/cordis" },
     { "path": "../../../vendor/schemastery" },
-    { "path": "../../runtime-diagnostics/invariants" },
-    { "path": "../../runtime/broker" },
-    { "path": "../../shell/shell" }
+    { "path": "../broker" },
+    { "path": "../../subprocess/subprocess" },
+    { "path": "../../util/timeout" },
+    { "path": "../../runtime-diagnostics/invariants" }
   ]
 }
