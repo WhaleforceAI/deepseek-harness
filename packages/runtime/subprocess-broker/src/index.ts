@@ -376,7 +376,7 @@ class BrokerSubprocessHandle implements SubprocessHandle {
         // The checker narrows from the guard above and cannot see that the
         // awaited tick may abort in between; dropping this would poll once
         // more after an abort.
-        // eslint-disable-next-line typescript/no-unnecessary-condition
+        // oxlint-disable-next-line typescript/no-unnecessary-condition
         if (this.termination.signal.aborted) continue
         current = await this.input(this.sessionId as BrokerSessionId, 'poll', undefined, this.termination.signal)
         this.append(current)

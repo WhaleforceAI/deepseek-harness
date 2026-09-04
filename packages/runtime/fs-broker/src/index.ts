@@ -202,7 +202,7 @@ export class BrokerFileSystem extends FileSystem {
   // The FileSystem contract makes `resolve` async and permits provider I/O.
   // This backend resolves purely from the path, and dropping `async` would turn
   // its rejections into synchronous throws.
-  // eslint-disable-next-line typescript/require-await
+  // oxlint-disable-next-line typescript/require-await
   override async resolve(path: string, opts?: { cwd?: string; signal?: AbortSignal }): Promise<FsTarget> {
     assertNotAborted(opts?.signal, 'resolve')
     if (path.trim().length === 0) throw new FsError('file_path must be a non-empty string', 'FS_NOT_FOUND')
