@@ -227,6 +227,11 @@
       // util/ folders are role-named without the util- prefix their npm names carry,
       // so these aliases stay hand-written like dsh-util-crypto above.
       "@deepseek-ai/dsh-util-time": ["./packages/util/time/src"],
+      // runtime/broker is role-named without the runtime- prefix its npm name
+      // carries, so its name does not match its directory and the generated
+      // aliases below cannot map it; it stays hand-written like the sdk/ three.
+      "@deepseek-ai/dsh-runtime-broker": ["./packages/runtime/broker/src"],
+      "@deepseek-ai/dsh-runtime-broker/invariant": ["./packages/runtime/broker/src/invariant.ts"],
       // BEGIN generated package aliases — pnpm run gen-tsconfig-paths
       "@deepseek-ai/dsh-acp": ["./packages/acp/acp/src"],
       "@deepseek-ai/dsh-acp-app": ["./packages/bundle/acp-app/src"],
@@ -246,6 +251,8 @@
       "@deepseek-ai/dsh-authorization": ["./packages/credentials/authorization/src"],
       "@deepseek-ai/dsh-authorization/invariant": ["./packages/credentials/authorization/src/invariant.ts"],
       "@deepseek-ai/dsh-base": ["./packages/bundle/base/src"],
+      "@deepseek-ai/dsh-bash-broker": ["./packages/shell/bash-broker/src"],
+      "@deepseek-ai/dsh-bash-broker/invariant": ["./packages/shell/bash-broker/src/invariant.ts"],
       "@deepseek-ai/dsh-bash-local": ["./packages/shell/bash-local/src"],
       "@deepseek-ai/dsh-bash-sandbox": ["./packages/shell/bash-sandbox/src"],
       "@deepseek-ai/dsh-brand": ["./packages/util/brand/src"],
