@@ -17,6 +17,37 @@ describe('BrokerFileSystem', () => {
     expect(filesystem({ async invoke() { return {} } }).sandboxMode).toBeUndefined()
   })
 
+  it('lists directory entries from the broker entries field', async () => {
+    const fs = filesystem({
+      async invoke(tool) {
+        if (tool === 'stat_file') return { type: 'directory', mtime_ms: 1 }
+        return { entries: [{ name: 'hello.txt', type: 'file', size: 5, mtime_ms: 2 }], truncated: false }
+      },
+    })
+
+    expect(await fs.listDir(await fs.resolve('.'))).toEqual([
+      {
+        name: 'hello.txt',
+        type: 'file',
+        size: 5,
+        target: await fs.resolve('hello.txt'),
+        version: FsVersion('broker:/workspace/hello.txt:file:5:2'),
+      },
+    ])
+  })
+
+  it('rejects a broker list response with files instead of entries', async () => {
+    const fs = filesystem({
+      async invoke(tool) {
+        if (tool === 'stat_file') return { type: 'directory', mtime_ms: 1 }
+        return { files: [], truncated: false }
+      },
+    })
+
+    await expect(fs.listDir(await fs.resolve('.')))
+      .rejects.toThrow('fs-broker: invalid list_files response entries')
+  })
+
   it('reads broker-sized ranges and reassembles base64 bytes exactly', async () => {
     const bytes = Buffer.alloc(1_048_577, 0)
     bytes[0] = 1

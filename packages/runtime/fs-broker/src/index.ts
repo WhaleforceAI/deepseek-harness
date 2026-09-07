@@ -120,9 +120,9 @@ function base64Content(value: unknown): Uint8Array {
 }
 
 function listResult(value: unknown): BrokerListEntry[] {
-  const files = record(value, 'list_files').files
-  if (!Array.isArray(files)) throw new Error('fs-broker: invalid list_files response files')
-  return files.map((entry) => {
+  const entries = record(value, 'list_files').entries
+  if (!Array.isArray(entries)) throw new Error('fs-broker: invalid list_files response entries')
+  return entries.map((entry) => {
     const response = record(entry, 'list_files')
     if (typeof response.name !== 'string' || response.name.length === 0 || response.name.includes('/')) {
       throw new Error('fs-broker: invalid list_files response name')
