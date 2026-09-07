@@ -9747,9 +9747,6 @@ importers:
       '@deepseek-ai/dsh':
         specifier: workspace:^
         version: link:../../apps/cli
-      '@deepseek-ai/dsh-acp':
-        specifier: workspace:^
-        version: link:../../packages/acp/acp
       '@deepseek-ai/dsh-agent':
         specifier: workspace:^
         version: link:../../packages/core/agent
