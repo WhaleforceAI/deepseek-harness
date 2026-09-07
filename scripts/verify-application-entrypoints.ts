@@ -1,5 +1,5 @@
 /**
- * Enforce dsh profiles as the only supported Node application launcher.
+ * Enforce the supported Node application launchers.
  * Vendor CLIs, build tools, and test tools are explicit classifications
  * rather than implicit holes.
  */
@@ -27,6 +27,7 @@ interface DemoPolicy {
 const MANIFEST_BIN_ALLOWLIST = new Map<string, ManifestBin>([
   ['apps/cli/package.json', { dsh: 'lib/bin.js' }],
   ['packages/experimental/webworker-packer/package.json', { 'dsh-pack-vfs-image': './bin.js' }],
+  ['packages/runtime/launcher/package.json', { 'dsh-jsonrpc-agent': 'lib/index.js' }],
 ])
 
 /** Every executable in a Node application workspace has one explicit role. */
@@ -35,6 +36,7 @@ const EXECUTABLE_SOURCE_ALLOWLIST = new Map<string, string>([
   ['packages/context/time-context/tests/fixtures/driver.ts', 'test-only subprocess driver'],
   ['packages/experimental/webworker-packer/bin.js', 'private build-only wrapper'],
   ['packages/experimental/webworker-packer/src/bin.ts', 'private build-only implementation'],
+  ['packages/runtime/launcher/src/index.ts', 'private Python SDK runtime launcher'],
   ['packages/sdk/client/tests/fake-runtime.ts', 'test-only SDK runtime peer'],
   ['packages/session/session-telemetry-otel/tests/fixtures/driver.ts', 'test-only subprocess driver'],
   ['packages/shell/tool-pwsh/tests/fixtures/loader/driver.ts', 'test-only subprocess driver'],
@@ -188,6 +190,6 @@ if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(resolve(p
     for (const failure of failures) console.error(`  ${failure}`)
     process.exitCode = 1
   } else {
-    console.log('verify-application-entrypoints: dsh is the only supported Node application launcher.')
+    console.log('verify-application-entrypoints: Node application launchers are explicitly classified.')
   }
 }

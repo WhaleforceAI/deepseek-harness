@@ -1026,6 +1026,25 @@ importers:
         specifier: workspace:^
         version: link:../../../vendor/include
 
+  packages/bundle/agent-runtime:
+    dependencies:
+      '@deepseek-ai/dsh-bash-local':
+        specifier: workspace:^
+        version: link:../../shell/bash-local
+      '@deepseek-ai/dsh-fs-broker':
+        specifier: workspace:^
+        version: link:../../runtime/fs-broker
+      '@deepseek-ai/dsh-runtime-broker':
+        specifier: workspace:^
+        version: link:../../runtime/broker
+      '@deepseek-ai/dsh-subprocess-broker':
+        specifier: workspace:^
+        version: link:../../runtime/subprocess-broker
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:^
+        version: link:../../../vendor/cordis
+
   packages/bundle/base:
     dependencies:
       '@deepseek-ai/cordis-plugin-hmr':
@@ -1103,9 +1122,6 @@ importers:
       '@deepseek-ai/dsh-llm-deepseek':
         specifier: workspace:^
         version: link:../../llm/llm-deepseek
-      '@deepseek-ai/dsh-llm-pi-ai':
-        specifier: workspace:^
-        version: link:../../llm/llm-pi-ai
       '@deepseek-ai/dsh-llm-retry':
         specifier: workspace:^
         version: link:../../llm/llm-retry
@@ -6641,6 +6657,46 @@ importers:
         specifier: workspace:^
         version: link:../broker
 
+  packages/runtime/launcher:
+    dependencies:
+      '@deepseek-ai/dsh-agent-runtime':
+        specifier: workspace:^
+        version: link:../../bundle/agent-runtime
+      '@deepseek-ai/dsh-app-boot':
+        specifier: workspace:^
+        version: link:../../boot/app-boot
+      '@deepseek-ai/dsh-base':
+        specifier: workspace:^
+        version: link:../../bundle/base
+      '@deepseek-ai/dsh-bash-local':
+        specifier: workspace:^
+        version: link:../../shell/bash-local
+      '@deepseek-ai/dsh-cmdline':
+        specifier: workspace:^
+        version: link:../../boot/cmdline
+      '@deepseek-ai/dsh-fs-broker':
+        specifier: workspace:^
+        version: link:../fs-broker
+      '@deepseek-ai/dsh-home-paths':
+        specifier: workspace:^
+        version: link:../../util/home-paths
+      '@deepseek-ai/dsh-launch-environment':
+        specifier: workspace:^
+        version: link:../../util/launch-environment
+      '@deepseek-ai/dsh-runtime-broker':
+        specifier: workspace:^
+        version: link:../broker
+      '@deepseek-ai/dsh-sdk-app':
+        specifier: workspace:^
+        version: link:../../bundle/sdk-app
+      '@deepseek-ai/dsh-subprocess-broker':
+        specifier: workspace:^
+        version: link:../subprocess-broker
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:^
+        version: link:../../../vendor/cordis
+
   packages/runtime/subprocess-broker:
     dependencies:
       '@deepseek-ai/schemastery':
@@ -9744,9 +9800,6 @@ importers:
       '@deepseek-ai/cosmokit':
         specifier: link:../../vendor/cosmokit
         version: link:../../vendor/cosmokit
-      '@deepseek-ai/dsh':
-        specifier: workspace:^
-        version: link:../../apps/cli
       '@deepseek-ai/dsh-agent':
         specifier: workspace:^
         version: link:../../packages/core/agent
@@ -9789,6 +9842,9 @@ importers:
       '@deepseek-ai/dsh-command-compact':
         specifier: workspace:^
         version: link:../../packages/compaction/command-compact
+      '@deepseek-ai/dsh-command-feedback':
+        specifier: workspace:^
+        version: link:../../packages/feedback/command-feedback
       '@deepseek-ai/dsh-command-goal':
         specifier: workspace:^
         version: link:../../packages/goal/command-goal
@@ -9891,6 +9947,9 @@ importers:
       '@deepseek-ai/dsh-runtime-broker':
         specifier: workspace:^
         version: link:../../packages/runtime/broker
+      '@deepseek-ai/dsh-runtime-launcher':
+        specifier: workspace:^
+        version: link:../../packages/runtime/launcher
       '@deepseek-ai/dsh-sandbox':
         specifier: workspace:^
         version: link:../../packages/sandbox/sandbox
@@ -9942,6 +10001,9 @@ importers:
       '@deepseek-ai/dsh-session-title':
         specifier: workspace:^
         version: link:../../packages/session/session-title
+      '@deepseek-ai/dsh-session-title-llm':
+        specifier: workspace:^
+        version: link:../../packages/session/session-title-llm
       '@deepseek-ai/dsh-settings':
         specifier: workspace:^
         version: link:../../packages/settings/settings
@@ -9960,6 +10022,12 @@ importers:
       '@deepseek-ai/dsh-spill':
         specifier: workspace:^
         version: link:../../packages/spill/spill
+      '@deepseek-ai/dsh-storage':
+        specifier: workspace:^
+        version: link:../../packages/storage/storage
+      '@deepseek-ai/dsh-storage-domain':
+        specifier: workspace:^
+        version: link:../../packages/storage/storage-domain
       '@deepseek-ai/dsh-subagent':
         specifier: workspace:^
         version: link:../../packages/subagent/subagent
@@ -10062,6 +10130,9 @@ importers:
       '@deepseek-ai/dsh-typert-protocol':
         specifier: workspace:^
         version: link:../../packages/typert/protocol
+      '@deepseek-ai/dsh-typert-registry':
+        specifier: workspace:^
+        version: link:../../packages/typert/registry
       '@deepseek-ai/dsh-user-approval':
         specifier: workspace:^
         version: link:../../packages/interaction/user-approval

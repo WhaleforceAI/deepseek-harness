@@ -227,11 +227,12 @@
       // util/ folders are role-named without the util- prefix their npm names carry,
       // so these aliases stay hand-written like dsh-util-crypto above.
       "@deepseek-ai/dsh-util-time": ["./packages/util/time/src"],
-      // runtime/broker is role-named without the runtime- prefix its npm name
-      // carries, so its name does not match its directory and the generated
-      // aliases below cannot map it; it stays hand-written like the sdk/ three.
+      // runtime/broker and runtime/launcher are role-named without the
+      // runtime- prefix their npm names carry, so the generated aliases below
+      // cannot map them; they stay hand-written like the sdk/ three.
       "@deepseek-ai/dsh-runtime-broker": ["./packages/runtime/broker/src"],
       "@deepseek-ai/dsh-runtime-broker/invariant": ["./packages/runtime/broker/src/invariant.ts"],
+      "@deepseek-ai/dsh-runtime-launcher": ["./packages/runtime/launcher/src/index.ts"],
       // Fork-private runtime providers stay beside the bridge and keep explicit
       // aliases outside the generated upstream package map.
       "@deepseek-ai/dsh-fs-broker": ["./packages/runtime/fs-broker/src"],
@@ -248,6 +249,7 @@
       "@deepseek-ai/dsh-agent-loop-testkit": ["./packages/test-support/agent-loop-testkit/src"],
       "@deepseek-ai/dsh-agent-presets": ["./packages/preset/agent-presets/src"],
       "@deepseek-ai/dsh-agent-presets/invariant": ["./packages/preset/agent-presets/src/invariant.ts"],
+      "@deepseek-ai/dsh-agent-runtime": ["./packages/bundle/agent-runtime/src"],
       "@deepseek-ai/dsh-agent-tool-presentation": ["./packages/core/agent-tool-presentation/src"],
       "@deepseek-ai/dsh-anonymous-user-id": ["./packages/identity/anonymous-user-id/src"],
       "@deepseek-ai/dsh-app-boot": ["./packages/boot/app-boot/src"],

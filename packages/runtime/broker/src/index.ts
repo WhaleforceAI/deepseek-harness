@@ -9,18 +9,25 @@ import type {} from '@deepseek-ai/dsh-tools'
 const MAX_BRIDGE_RESPONSE_BYTES = 12 * 1024 * 1024
 
 export interface BrokerBridgeConfig {
+  /** Absolute Unix socket path for this run’s Runtime bridge. */
   socketPath: string
+  /** Run-scoped bridge authentication secret, at least 32 characters. */
   secret: string
 }
 
 export interface NativeBrokerTool {
+  /** Broker tool name registered with the Harness tool registry. */
   name: string
+  /** Model-facing description of the broker tool. */
   description: string
+  /** JSON Schema for the tool arguments forwarded to the broker. */
   inputSchema: Record<string, unknown>
+  /** Declared per-tool output byte limit; this adapter does not enforce it. */
   outputLimitBytes: number
 }
 
 export interface Config extends BrokerBridgeConfig {
+  /** Native broker tools to register; an empty list registers none. */
   tools?: NativeBrokerTool[]
 }
 

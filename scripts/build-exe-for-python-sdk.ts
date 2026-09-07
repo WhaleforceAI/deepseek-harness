@@ -17,8 +17,17 @@ const root = resolve(import.meta.dirname, '..')
 
 /** The closure manifest whose dependencies define the executable. */
 const DEPLOY_ROOT_PACKAGE = 'dsh-python-runtime-closure'
-/** The sole application launcher inside the deployed closure. */
-const ENTRY_BIN = 'node_modules/@deepseek-ai/dsh/lib/bin.js'
+/**
+ * The sole application launcher inside the deployed closure.
+ *
+ * Deliberately NOT `@deepseek-ai/dsh`: packaging the CLI app pulls its whole
+ * dependency graph into the closure, and that graph declares
+ * `@deepseek-ai/dsh-mcp-client` and `@deepseek-ai/dsh-acp-app` and reaches
+ * `@google/genai` through the base bundle's `dsh-llm-pi-ai` — all rejected by
+ * the Agent Runtime staged-closure scanner. The lean launcher boots one Cordis
+ * config and nothing else, which is what the pre-0.1.2 packaged bin did.
+ */
+const ENTRY_BIN = 'node_modules/@deepseek-ai/dsh-runtime-launcher/lib/index.js'
 /** Python-visible executable basename. */
 const OUTPUT_BASENAME = 'deepseek-harness-sdk-runtime'
 /** Default Node major; SEA mode requires at least Node 22. */

@@ -710,6 +710,24 @@ export interface Config {
 
 Source: [`packages/context/file-reference-local/src/index.ts:34`](../packages/context/file-reference-local/src/index.ts)
 
+<a id="deepseek-aidsh-fs-broker"></a>
+
+## `@deepseek-ai/dsh-fs-broker`
+
+```ts config-catalog
+/** Configuration for the filesystem provider backed by an Agent Runtime broker. */
+export interface Config {
+  /** Absolute Unix-socket path for the run-local broker. */
+  socketPath: string
+  /** Run-local broker authentication secret. */
+  secret: string
+  /** Base path for relative filesystem requests. */
+  cwd?: string
+}
+```
+
+Source: [`packages/runtime/fs-broker/src/index.ts:31`](../packages/runtime/fs-broker/src/index.ts)
+
 <a id="deepseek-aidsh-fs-local"></a>
 
 ## `@deepseek-ai/dsh-fs-local`
@@ -1688,6 +1706,39 @@ export interface Config {
 
 Source: [`packages/guard/repeat-tool-reminder/src/index.ts:28`](../packages/guard/repeat-tool-reminder/src/index.ts)
 
+<a id="deepseek-aidsh-runtime-broker"></a>
+
+## `@deepseek-ai/dsh-runtime-broker`
+
+Requires: `tools`
+
+```ts config-catalog
+export interface Config extends BrokerBridgeConfig {
+  /** Native broker tools to register; an empty list registers none. */
+  tools?: NativeBrokerTool[]
+}
+
+export interface BrokerBridgeConfig {
+  /** Absolute Unix socket path for this run’s Runtime bridge. */
+  socketPath: string
+  /** Run-scoped bridge authentication secret, at least 32 characters. */
+  secret: string
+}
+
+export interface NativeBrokerTool {
+  /** Broker tool name registered with the Harness tool registry. */
+  name: string
+  /** Model-facing description of the broker tool. */
+  description: string
+  /** JSON Schema for the tool arguments forwarded to the broker. */
+  inputSchema: Record<string, unknown>
+  /** Declared per-tool output byte limit; this adapter does not enforce it. */
+  outputLimitBytes: number
+}
+```
+
+Source: [`packages/runtime/broker/src/index.ts:29`](../packages/runtime/broker/src/index.ts)
+
 <a id="deepseek-aidsh-sandbox-local"></a>
 
 ## `@deepseek-ai/dsh-sandbox-local`
@@ -2477,6 +2528,26 @@ export interface Config {
 
 Source: [`packages/subagent/subagent-spawn-in-process/src/index.ts:25`](../packages/subagent/subagent-spawn-in-process/src/index.ts)
 
+<a id="deepseek-aidsh-subprocess-broker"></a>
+
+## `@deepseek-ai/dsh-subprocess-broker`
+
+```ts config-catalog
+/** Configuration for the Agent Runtime broker subprocess provider. */
+export interface Config {
+  /** Absolute Unix-socket path for the run-local broker. */
+  socketPath: string
+  /** Run-local broker authentication secret. */
+  secret: string
+  /** Base path used to resolve a relative PATH result. */
+  cwd?: string
+  /** Delay between remote command polls in milliseconds. */
+  pollMs?: number
+}
+```
+
+Source: [`packages/runtime/subprocess-broker/src/index.ts:38`](../packages/runtime/subprocess-broker/src/index.ts)
+
 <a id="deepseek-aidsh-subprocess-e2b"></a>
 
 ## `@deepseek-ai/dsh-subprocess-e2b`
@@ -2688,6 +2759,8 @@ Requires: `tools` · `systemPrompt` · `subprocess`
 export interface Config {
   /** Whether an over-cap `glob` page is sampled across top-level entries instead of taking the modification-time head. */
   sampleOverCapGlobResults: boolean
+  /** Ripgrep executable to spawn verbatim; omitted resolves the packaged `@vscode/ripgrep` binary. */
+  ripgrepPath?: string
   /** Max paths one `glob` call retains inline; later paths go to the formatted spill file. */
   globMaxResults?: number
   /** Max flat matches one `grep` call retains inline; later matches go to the formatted spill file. */
@@ -2710,7 +2783,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/fs/tool-fs-search/src/index.ts:73`](../packages/fs/tool-fs-search/src/index.ts)
+Source: [`packages/fs/tool-fs-search/src/index.ts:72`](../packages/fs/tool-fs-search/src/index.ts)
 
 <a id="deepseek-aidsh-tool-goal"></a>
 
@@ -3441,6 +3514,7 @@ Abstract service classes — a deployment loads a concrete implementation packag
 Imported as libraries by other packages; a `cordis.yml` cannot load them.
 
 - `@deepseek-ai/dsh-agent-loop-testkit` ([`packages/test-support/agent-loop-testkit/src/index.ts`](../packages/test-support/agent-loop-testkit/src/index.ts))
+- `@deepseek-ai/dsh-agent-runtime` ([`packages/bundle/agent-runtime/src/index.ts`](../packages/bundle/agent-runtime/src/index.ts))
 - `@deepseek-ai/dsh-anonymous-user-id` ([`packages/identity/anonymous-user-id/src/index.ts`](../packages/identity/anonymous-user-id/src/index.ts))
 - `@deepseek-ai/dsh-app-boot` ([`packages/boot/app-boot/src/index.ts`](../packages/boot/app-boot/src/index.ts))
 - `@deepseek-ai/dsh-atomic-write` ([`packages/util/atomic-write/src/index.ts`](../packages/util/atomic-write/src/index.ts))
@@ -3464,6 +3538,7 @@ Imported as libraries by other packages; a `cordis.yml` cannot load them.
 - `@deepseek-ai/dsh-loader-smoke` ([`packages/test-support/loader-smoke/src/index.ts`](../packages/test-support/loader-smoke/src/index.ts))
 - `@deepseek-ai/dsh-native-command` ([`packages/util/native-command/src/index.ts`](../packages/util/native-command/src/index.ts))
 - `@deepseek-ai/dsh-output-retention` ([`packages/util/output-retention/src/index.ts`](../packages/util/output-retention/src/index.ts))
+- `@deepseek-ai/dsh-runtime-launcher` ([`packages/runtime/launcher/src/index.ts`](../packages/runtime/launcher/src/index.ts))
 - `@deepseek-ai/dsh-sandbox-windows-acl` ([`packages/sandbox/sandbox-windows-acl/src/index.ts`](../packages/sandbox/sandbox-windows-acl/src/index.ts))
 - `@deepseek-ai/dsh-scope` ([`packages/core/scope/src/index.ts`](../packages/core/scope/src/index.ts))
 - `@deepseek-ai/dsh-sdk-client` ([`packages/sdk/client/src/index.ts`](../packages/sdk/client/src/index.ts))
