@@ -8,7 +8,7 @@ import { composeEntries } from '@deepseek-ai/dsh-app-boot'
 import { composeProfile, parseLaunchArgs } from '../src/index.ts'
 
 const repoRoot = fileURLToPath(new URL('../../../../', import.meta.url))
-const launcher = fileURLToPath(new URL('../src/index.ts', import.meta.url))
+const launcher = fileURLToPath(new URL('../src/startup.ts', import.meta.url))
 const sdkStartup = fileURLToPath(new URL('../../../bundle/sdk-app/src/index.ts', import.meta.url))
 const roots: string[] = []
 const originalHome = process.env.DSH_HOME

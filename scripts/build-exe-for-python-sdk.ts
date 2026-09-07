@@ -27,7 +27,7 @@ const DEPLOY_ROOT_PACKAGE = 'dsh-python-runtime-closure'
  * the Agent Runtime staged-closure scanner. The lean launcher boots one Cordis
  * config and nothing else, which is what the pre-0.1.2 packaged bin did.
  */
-const ENTRY_BIN = 'node_modules/@deepseek-ai/dsh-runtime-launcher/lib/index.js'
+const ENTRY_BIN = 'node_modules/@deepseek-ai/dsh-runtime-launcher/lib/startup.js'
 /** Python-visible executable basename. */
 const OUTPUT_BASENAME = 'deepseek-harness-sdk-runtime'
 /** Default Node major; SEA mode requires at least Node 22. */

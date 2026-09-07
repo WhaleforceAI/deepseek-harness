@@ -18,7 +18,7 @@
  * @module @deepseek-ai/dsh-runtime-launcher
  */
 
-import { realpathSync, writeFileSync } from 'node:fs'
+import { writeFileSync } from 'node:fs'
 import { isAbsolute, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { FiberState, type Context } from '@deepseek-ai/cordis'
@@ -36,7 +36,7 @@ import { provideCmdline, type AppReady } from '@deepseek-ai/dsh-cmdline'
 import { resolveDshHome } from '@deepseek-ai/dsh-home-paths'
 import { DSH_LAUNCH_ENVIRONMENT_KEY } from '@deepseek-ai/dsh-launch-environment'
 
-const NAME = 'dsh-jsonrpc-agent'
+export const NAME = 'dsh-jsonrpc-agent'
 const INSTALL_ANCHOR = fileURLToPath(new URL('../package.json', import.meta.url))
 const PROFILE_ROOT_CONFIG = `# dsh profile root — an empty entry list. The tree is composed as patches:
 # each bundle in package.json's dsh.profile.bundles, then cordis.patch.yml, then any
@@ -173,9 +173,3 @@ export async function runJsonrpcAgent(argv: readonly string[] = process.argv.sli
 }
 
 // Resolve bin symlinks too: the installed npm bin and packaged entry share this module.
-if (process.argv[1] !== undefined && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  await runJsonrpcAgent().catch((error: unknown) => {
-    process.stderr.write(`${NAME}: ${error instanceof Error ? error.stack ?? error.message : String(error)}\n`)
-    process.exitCode = 1
-  })
-}
