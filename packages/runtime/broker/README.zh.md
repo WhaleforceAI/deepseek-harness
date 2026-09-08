@@ -46,7 +46,7 @@ kind: "package-reference"
 
 [bridge 所有者](src/index.ts)在修改派发前及完成后推进代次。待完成写入会禁用发现结果复用。第一次命令或 stdin 派发会在该运行余下时间禁用复用，因为已完成的命令仍可能留下继续修改工作区的脱离后代进程。成功的原生目录列表会通知文件系统 provider，使相互矛盾的观察结果令缓存失效。
 
-`BrokerInvokeError` 保留经过验证的 broker 拒绝的 `code` 和 HTTP `status`。第一个 `run_quota_exceeded` 会锁定该错误、中止进行中的 bridge 请求、取消 agent（智能体），并在打开 socket 之前拒绝后续普通操作。Python Runtime 独立于会话取消事件保留带类型的终止失败，并负责免配额的远程完成操作。Cordis 释放过程关闭 bridge 并注销原生工具；新运行创建全新状态。
+`BrokerInvokeError` 保留经过验证的 broker 拒绝的 `code` 和 HTTP `status`。第一个 `run_quota_exceeded` 会锁定该错误、中止进行中的 bridge 请求、取消 agent（智能体），并在打开 socket 之前拒绝后续普通操作。会话通过 hook 取消记录 `runtime-broker: run_quota_exceeded`，包括第一次模型请求之前发生的拒绝。Python Runtime 独立于会话取消事件保留带类型的终止失败，并负责免配额的远程完成操作。Cordis 释放过程关闭 bridge 并注销原生工具；新运行创建全新状态。
 
 修改状态只有一个所有者，不存在可供 invariant（不变量）比较的独立运行时观察结果。传输验证和针对性的生命周期测试约束其输入与状态转换。
 

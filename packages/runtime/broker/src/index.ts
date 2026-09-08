@@ -238,9 +238,10 @@ export function apply(ctx: Context, config: Config): void {
   const bridge = new BrokerBridge(config)
   ctx.provide('runtimeBroker', bridge)
   ctx.effect(() => () => { bridge.dispose() })
-  ctx.effect(() => bridge.onTerminal(() => {
-    for (const agent of ctx.agents.list()) agent.cancel({ kind: 'disposed' })
-    ctx.agents.currentInitiator()?.cancel({ kind: 'disposed' })
+  ctx.effect(() => bridge.onTerminal((error) => {
+    const cause = { kind: 'hook' as const, reason: error.message }
+    for (const agent of ctx.agents.list()) agent.cancel(cause)
+    ctx.agents.currentInitiator()?.cancel(cause)
   }))
   ctx.on('agent/pre-step', (_event, next) => {
     bridge.assertAvailable()

@@ -578,6 +578,28 @@ describe('headless recorded-session snapshots', () => {
     expect(violations).toEqual([])
   })
 
+  it('pins Runtime broker quota as terminal at discovery, tool, and command boundaries', async () => {
+    const quotaReason = {
+      kind: 'aborted',
+      reason: { kind: 'hook', reason: 'runtime-broker: run_quota_exceeded' },
+    }
+    const expectations = [
+      ['runtime-broker-discovery-quota', 0, false],
+      ['runtime-broker-command-quota', 1, true],
+      ['runtime-broker-quota', 2, true],
+    ] as const
+    for (const [name, steps, hasToolError] of expectations) {
+      const log = await readFile(join(snapshotsRoot, name, 'session.jsonl'), 'utf8')
+      const events = records(log)
+      expect(events.filter(event => event.type === 'step/start'), `${name}: model request count`).toHaveLength(steps)
+      expect(turnReasonFromSession(log), `${name}: terminal quota reason`).toEqual(quotaReason)
+      expect(log.includes('AggregateError'), `${name}: original quota error`).toBe(false)
+      expect(events.some(event => event.type === 'tool/result'
+        && JSON.stringify(event).includes('Error: runtime-broker: run_quota_exceeded')), `${name}: tool error`)
+        .toBe(hasToolError)
+    }
+  })
+
   it('stores session-owned inputs with typed redaction and no ACP transcript', async () => {
     for (const scenario of scenarios) {
       const fixtures = await fixtureSessions(scenario)

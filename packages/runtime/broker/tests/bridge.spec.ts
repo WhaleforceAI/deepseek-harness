@@ -1,8 +1,12 @@
 import { mkdtemp, rm } from 'node:fs/promises'
 import { createServer, type Socket } from 'node:net'
 import { join } from 'node:path'
+import { Context } from '@deepseek-ai/cordis'
+import AgentRegistry from '@deepseek-ai/dsh-agent'
+import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
+import ToolRuntime from '@deepseek-ai/dsh-tools'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { BrokerBridge, BrokerInvokeError } from '../src/index.ts'
+import * as RuntimeBroker from '../src/index.ts'
 
 const cleanups: (() => Promise<void>)[] = []
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup() })
@@ -29,7 +33,7 @@ async function harness(reply: (request: Request) => unknown) {
   })
   const config = { socketPath: join(directory, 'bridge.sock'), secret: 'a'.repeat(32), cacheDiscovery: true }
   await new Promise<void>(resolve => server.listen(config.socketPath, resolve))
-  const bridge = new BrokerBridge(config)
+  const bridge = new RuntimeBroker.BrokerBridge(config)
   cleanups.push(async () => {
     bridge.dispose()
     for (const socket of sockets) socket.destroy()
@@ -45,7 +49,7 @@ describe('run-owned bridge', () => {
     const onTerminal = vi.fn()
     bridge.onTerminal(onTerminal)
     const error = await bridge.invoke('stat_file', {}).catch((error: unknown) => error)
-    expect(error).toBeInstanceOf(BrokerInvokeError)
+    expect(error).toBeInstanceOf(RuntimeBroker.BrokerInvokeError)
     expect(error).toMatchObject({ code: 'run_quota_exceeded', status: 403, message: 'runtime-broker: run_quota_exceeded' })
     for (let i = 0; i < 10; i++) {
       for (const tool of ['stat_file', 'exec_command', 'write_file', 'write_stdin']) {
@@ -55,7 +59,7 @@ describe('run-owned bridge', () => {
     expect(calls).toEqual(['stat_file'])
     expect(onTerminal).toHaveBeenCalledExactlyOnceWith(error)
     expect(bridge.cacheAllowed).toBe(false)
-    const fresh = new BrokerBridge(config)
+    const fresh = new RuntimeBroker.BrokerBridge(config)
     expect(fresh.terminalError).toBeUndefined()
     expect(fresh.generation).toBe(0)
     expect(fresh.cacheAllowed).toBe(true)
@@ -81,7 +85,7 @@ describe('run-owned bridge', () => {
     expect(bridge.generation).toBe(1)
     expect(bridge.cacheAllowed).toBe(false)
     result.resolve({ ok: false, error: { code: 'write_failed', status: 500 } })
-    await expect(write).rejects.toBeInstanceOf(BrokerInvokeError)
+    await expect(write).rejects.toBeInstanceOf(RuntimeBroker.BrokerInvokeError)
     expect(bridge.generation).toBe(2)
     expect(bridge.cacheAllowed).toBe(true)
   })
@@ -124,6 +128,42 @@ describe('run-owned bridge', () => {
     remove()
     await bridge.invoke('list_files', { path: '/workspace' })
     expect(listener).toHaveBeenCalledTimes(1)
+  })
+
+  it('removes every plugin contribution and disposes its bridge with the contributing fiber', async () => {
+    const ctx = new Context()
+    cleanups.push(() => ctx.fiber.dispose())
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(AgentRegistry)
+    const fiber = await ctx.plugin(RuntimeBroker, {
+      socketPath: '/tmp/dsh-disposed-broker.sock',
+      secret: 'a'.repeat(32),
+      tools: [{
+        name: 'broker_probe',
+        description: 'Probe the Runtime broker.',
+        inputSchema: { type: 'object', properties: {} },
+        outputLimitBytes: 1024,
+      }],
+    })
+    const bridge = ctx.get('runtimeBroker')
+    if (bridge === undefined) throw new Error('runtime broker service was not mounted')
+    const assertAvailable = vi.spyOn(bridge, 'assertAvailable')
+    const next = vi.fn(async () => ({ kind: 'enter' as const, messages: [] }))
+
+    expect(ctx.tools.get('broker_probe')).toBeDefined()
+    await expect(ctx.waterfall(ctx as never, 'agent/pre-step', {} as never, next))
+      .resolves.toEqual({ kind: 'enter', messages: [] })
+    expect(assertAvailable).toHaveBeenCalledOnce()
+
+    await fiber.dispose()
+
+    expect(ctx.get('runtimeBroker')).toBeUndefined()
+    expect(ctx.tools.get('broker_probe')).toBeUndefined()
+    await expect(ctx.waterfall(ctx as never, 'agent/pre-step', {} as never, next))
+      .resolves.toEqual({ kind: 'enter', messages: [] })
+    expect(assertAvailable).toHaveBeenCalledOnce()
+    await expect(bridge.invoke('stat_file', {})).rejects.toThrow('runtime-broker: bridge disposed')
   })
 
   it('aborts already-dispatched siblings with the original quota error', async () => {

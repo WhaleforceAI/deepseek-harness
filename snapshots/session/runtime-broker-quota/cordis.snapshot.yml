@@ -64,6 +64,7 @@
       name: '@deepseek-ai/dsh-subprocess-broker'
       config:
         cwd: !!js process.cwd()
+        pollMs: 1
 
     - id: fs-broker
       name: '@deepseek-ai/dsh-fs-broker'

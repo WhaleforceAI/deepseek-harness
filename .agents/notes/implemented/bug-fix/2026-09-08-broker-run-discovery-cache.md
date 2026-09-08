@@ -14,7 +14,7 @@ One Cordis-owned bridge represents the Runtime run lease. It owns mutation gener
 
 Discovery reuse is an explicit opt-in for run-exclusive workspaces. The first command or stdin dispatch disables reuse until disposal, including successful commands: a completed broker session can leave detached descendants that continue to modify files. Full generation invalidation replaces path-specific dependency tracking because commands can modify arbitrary authorized paths.
 
-Any quota denial stops this harness run, even if another operation could have a higher limit. Existing agent cancellation aborts the current activity; bridge guards block subsequent requests. Python Runtime preserves the typed quota failure independently of the session cancellation record and completes the remote run through its quota-exempt control path. Cleanup failure remains separate from the original denial.
+Any quota denial stops this harness run, even if another operation could have a higher limit. Existing hook cancellation aborts the current activity and records the quota message in the session, including discovery before the first model request; bridge guards block subsequent requests. Python Runtime preserves the typed quota failure independently of the session cancellation record and completes the remote run through its quota-exempt control path. Cleanup failure remains separate from the original denial.
 
 ## Alternatives considered
 
