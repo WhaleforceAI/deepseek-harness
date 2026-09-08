@@ -23,7 +23,7 @@ Compose profile bundles in this order:
 ]
 ```
 
-The bundle deliberately omits broker `socketPath` and `secret` values. Supply both fields for `subprocess-broker`, `fs-broker`, and `runtime-broker-tools` in a final per-run patch. That patch also owns Runtime-specific session and storage roots, the model adapter, system prompt, and any native broker tool declarations.
+The bundle deliberately omits broker `socketPath` and `secret` values. Supply both fields on `runtime-broker-tools` in a final per-run patch; filesystem and subprocess providers inject that shared run owner. Enable its `cacheDiscovery` only for a run-exclusive workspace. That patch also owns Runtime-specific session and storage roots, the model adapter, system prompt, and any native broker tool declarations.
 
 Set `DSH_TELEMETRY_DISABLED=1` in the Harness environment as the process-level telemetry opt-out in addition to this layer's disabled telemetry row.
 

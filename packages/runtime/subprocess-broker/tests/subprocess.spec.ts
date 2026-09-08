@@ -1,5 +1,6 @@
 import { Context } from '@deepseek-ai/cordis'
 import type { SubprocessSpawnSpec } from '@deepseek-ai/dsh-subprocess'
+import { BrokerInvokeError } from '@deepseek-ai/dsh-runtime-broker'
 import BrokerSubprocessRuntime from '../src/index.ts'
 import { describe, expect, it } from 'vitest'
 
@@ -11,6 +12,7 @@ interface Invocation {
 
 class FakeBridge {
   readonly calls: Invocation[] = []
+  terminalError: BrokerInvokeError | undefined
 
   constructor(private readonly respond: (call: Invocation) => unknown) {}
 
@@ -24,7 +26,7 @@ class FakeBridge {
 function runtime(bridge: FakeBridge, pollMs = 1): BrokerSubprocessRuntime {
   return new BrokerSubprocessRuntime(
     new Context(),
-    { socketPath: '/run/broker.sock', secret: 'x'.repeat(32), pollMs },
+    { pollMs },
     bridge,
   )
 }
@@ -44,6 +46,39 @@ function spawnSpec(overrides: Partial<SubprocessSpawnSpec> = {}): SubprocessSpaw
 }
 
 describe('BrokerSubprocessRuntime', () => {
+  it('preserves quota exhaustion during a poll without attempting an ordinary kill', async () => {
+    const quota = new BrokerInvokeError('run_quota_exceeded', 403)
+    const bridge = new FakeBridge(({ tool }) => {
+      if (tool === 'exec_command') return { session_id: 'process' }
+      bridge.terminalError = quota
+      throw quota
+    })
+    const handle = runtime(bridge).spawn(spawnSpec())
+
+    await expect(handle.done).rejects.toBe(quota)
+    expect(bridge.calls.map(call => call.args.action).filter(Boolean)).toEqual(['poll'])
+  })
+
+  it('preserves the shared quota cause when another provider aborts the command', async () => {
+    const quota = new BrokerInvokeError('run_quota_exceeded', 403)
+    const pollStarted = Promise.withResolvers<undefined>()
+    const controller = new AbortController()
+    const bridge = new FakeBridge(({ tool, signal }) => {
+      if (tool === 'exec_command') return { session_id: 'process' }
+      pollStarted.resolve(undefined)
+      return new Promise((_, reject) => {
+        signal?.addEventListener('abort', () => { reject(new Error('poll aborted')) }, { once: true })
+      })
+    })
+    const handle = runtime(bridge).spawn(spawnSpec({ signal: controller.signal }))
+    await pollStarted.promise
+    bridge.terminalError = quota
+    controller.abort()
+
+    await expect(handle.done).rejects.toBe(quota)
+    expect(bridge.calls.map(call => call.args.action).filter(Boolean)).toEqual(['poll'])
+  })
+
   it('spawns with exact argv and no shell command', async () => {
     const bridge = new FakeBridge(({ tool, args }) => {
       if (tool === 'exec_command') return { stdout: 'one', session_id: 'process' }

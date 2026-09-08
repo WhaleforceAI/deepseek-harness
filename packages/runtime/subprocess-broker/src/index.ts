@@ -10,7 +10,8 @@ import { posix } from 'node:path'
 import { PassThrough, Writable } from 'node:stream'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { BrokerBridge } from '@deepseek-ai/dsh-runtime-broker'
+import { BrokerInvokeError } from '@deepseek-ai/dsh-runtime-broker'
+import type { BrokerBridge } from '@deepseek-ai/dsh-runtime-broker'
 import { SubprocessRuntime } from '@deepseek-ai/dsh-subprocess'
 import type {
   SubprocessCollect,
@@ -36,10 +37,6 @@ const MAX_WORKDIR_CHARACTERS = 1_024
 
 /** Configuration for the Agent Runtime broker subprocess provider. */
 export interface Config {
-  /** Absolute Unix-socket path for the run-local broker. */
-  socketPath: string
-  /** Run-local broker authentication secret. */
-  secret: string
   /** Base path used to resolve a relative PATH result. */
   cwd?: string
   /** Delay between remote command polls in milliseconds. */
@@ -53,13 +50,11 @@ interface ResolvedConfig extends Config {
 
 /** Loader schema for {@link BrokerSubprocessRuntime}. */
 export const Config: z<Config> = z.object({
-  socketPath: z.string(),
-  secret: z.string(),
   cwd: z.string().default('/workspace'),
   pollMs: z.number().default(100),
 })
 
-type BrokerInvoker = Pick<BrokerBridge, 'invoke'>
+type BrokerInvoker = Pick<BrokerBridge, 'invoke'> & Partial<Pick<BrokerBridge, 'terminalError'>>
 type BrokerSessionId = string | number
 
 interface BrokerResult {
@@ -383,19 +378,25 @@ class BrokerSubprocessHandle implements SubprocessHandle {
       }
       return outcome(current, this.termination.signal.aborted)
     } catch (error: unknown) {
+      const terminalError = this.bridge.terminalError
+        ?? (error instanceof BrokerInvokeError && error.code === 'run_quota_exceeded' ? error : undefined)
+      const failure = terminalError ?? error
       if (!published) {
         this.sessionState.resolve(undefined)
-        this.readyState.reject(error)
-      } else if (this.sessionId !== undefined) {
+        this.readyState.reject(failure)
+      } else if (this.sessionId !== undefined && terminalError === undefined) {
         try {
           const killed = await this.input(this.sessionId, 'kill')
           this.append(killed)
           if (this.termination.signal.aborted) return outcome(killed, true)
         } catch (cleanupError: unknown) {
+          if (this.bridge.terminalError !== undefined) throw this.bridge.terminalError
+          if (cleanupError instanceof BrokerInvokeError && cleanupError.code === 'run_quota_exceeded') throw cleanupError
           throw new AggregateError([error, cleanupError], 'subprocess-broker: command failed and broker kill failed')
         }
       }
-      throw error
+      // Runtime's quota-exempt run completion owns remote cleanup after exhaustion.
+      throw failure
     } finally {
       this.settled = true
       this.spec.signal?.removeEventListener('abort', this.onAbort)
@@ -476,19 +477,18 @@ class BrokerTerminalHandle implements SubprocessTerminalHandle {
 /** Agent Runtime broker command manager registered as `ctx.subprocess`. */
 export class BrokerSubprocessRuntime extends SubprocessRuntime {
   static Config = Config
+  static inject = ['runtimeBroker']
 
   private readonly config: ResolvedConfig
   private readonly live = new Set<BrokerSubprocessHandle>()
   private disposing = false
 
   /** Create the broker subprocess service and bind its disposal policy. */
-  constructor(ctx: Context, config: Config, private readonly bridge: BrokerInvoker = new BrokerBridge(config)) {
+  constructor(ctx: Context, config: Config, private readonly bridge: BrokerInvoker = ctx.runtimeBroker) {
     super(ctx)
     // Rebuilt field by field rather than spread: the loader hands us a
     // schemastery instance, and spreading one drops its prototype.
     this.config = {
-      socketPath: config.socketPath,
-      secret: config.secret,
       cwd: config.cwd ?? '/workspace',
       pollMs: config.pollMs ?? 100,
     }
@@ -503,6 +503,8 @@ export class BrokerSubprocessRuntime extends SubprocessRuntime {
       const handles = [...this.live]
       for (const handle of handles) handle.terminate()
       const outcomes = await Promise.allSettled(handles.map(handle => handle.waitForExit()))
+      // Python Runtime closes the run and reports its quota and cleanup outcomes.
+      if (this.bridge.terminalError !== undefined) return
       const failures = outcomes.flatMap<unknown>(
         entry => entry.status === 'rejected' ? [entry.reason as unknown] : [],
       )

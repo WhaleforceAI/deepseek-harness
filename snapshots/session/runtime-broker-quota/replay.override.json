@@ -1,0 +1,22 @@
+[
+  {
+    "kind": "chunks",
+    "chunks": [
+      { "type": "block-start", "index": 0, "blockType": "tool-call" },
+      { "type": "tool-call-delta", "index": 0, "id": "call_todo", "name": "todo_write", "argumentsDelta": "{\"todos\":[{\"content\":\"observe cache reuse\",\"status\":\"completed\"}]}" },
+      { "type": "block-end", "index": 0, "block": { "type": "tool-call", "id": "call_todo", "name": "todo_write", "arguments": "{\"todos\":[{\"content\":\"observe cache reuse\",\"status\":\"completed\"}]}" } },
+      { "type": "usage", "usage": { "inputTokens": 10, "outputTokens": 5 } },
+      { "type": "finish", "reason": { "kind": "tool-calls" } }
+    ]
+  },
+  {
+    "kind": "chunks",
+    "chunks": [
+      { "type": "block-start", "index": 0, "blockType": "tool-call" },
+      { "type": "tool-call-delta", "index": 0, "id": "call_quota", "name": "write_file", "argumentsDelta": "{\"path\":\"AGENTS.md\",\"content\":\"must not be written\"}" },
+      { "type": "block-end", "index": 0, "block": { "type": "tool-call", "id": "call_quota", "name": "write_file", "arguments": "{\"path\":\"AGENTS.md\",\"content\":\"must not be written\"}" } },
+      { "type": "usage", "usage": { "inputTokens": 10, "outputTokens": 5 } },
+      { "type": "finish", "reason": { "kind": "tool-calls" } }
+    ]
+  }
+]

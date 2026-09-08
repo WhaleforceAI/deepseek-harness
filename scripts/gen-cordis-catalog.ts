@@ -75,6 +75,7 @@ export const SERVICE_PAGE: Record<string, string> = {
   deepseekLlmApiExtensions: 'llm-streaming.md',
   dynamicCordisRunner: 'extensions.md',
   e2b: 'subprocess.md',
+  runtimeBroker: 'subprocess.md',
   fileReferences: 'session-reference.md',
   fs: 'filesystem.md',
   goals: 'goal.md',
@@ -652,6 +653,7 @@ export const FOUNDATION_TYPE_NAMES: ReadonlySet<string> = new Set([
 
 /** Project types deliberately documented outside the subsystems catalog. */
 export const TYPE_LINK_EXEMPTIONS: Readonly<Record<string, string>> = {
+  BrokerInvokeError: 'run-local broker rejection code and HTTP status are owned by packages/runtime/broker/README.md',
   z: 'schemastery schema constructor is owned by vendor/schemastery (vendored upstream)',
   BeginCommandRequest: 'event-local request contract is owned by packages/client/ui-input-trigger/src/types.ts',
   InsertReferenceRequest: 'event-local request contract is owned by packages/client/ui-input-trigger/src/types.ts',
