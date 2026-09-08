@@ -94,7 +94,7 @@ function statResult(value: unknown, operation: string): BrokerStat | undefined {
     throw new Error(`fs-broker: invalid ${operation} response exists`)
   }
   if (response.exists === false) return undefined
-  const type = response.type
+  const type = response.type === 'dir' ? 'directory' : response.type
   if (type !== 'file' && type !== 'directory' && type !== 'other' && type !== 'symlink') {
     throw new Error(`fs-broker: invalid ${operation} response type`)
   }

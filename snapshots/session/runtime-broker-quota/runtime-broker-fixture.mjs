@@ -1,4 +1,5 @@
 /** Deterministic run-local Unix-socket broker for the Runtime composition snapshot. */
+import { unlinkSync } from 'node:fs'
 import { rm } from 'node:fs/promises'
 import { createServer } from 'node:net'
 import { join } from 'node:path'
@@ -38,12 +39,31 @@ export async function apply(ctx) {
           if (statKeys.has(key)) throw new Error(`runtime-broker snapshot: duplicate discovery stat ${key}`)
           statKeys.add(key)
           if (mode === 'discovery-quota') { quota(); return }
+          if (request.arguments.path === join(process.cwd(), '.skills')) {
+            socket.end(JSON.stringify({ id: request.id, ok: true, result: {
+              exists: true, type: 'dir', size: 4096, mode: 0o755, mtime_ms: 1,
+            } }) + '\n')
+            return
+          }
           const outside = !request.arguments.path.startsWith(`${process.cwd()}/`)
             && request.arguments.path !== process.cwd()
           socket.end(JSON.stringify(outside
             ? { id: request.id, ok: false, error: { code: 'file_path_outside_workspace', status: 422 } }
             : { id: request.id, ok: true, result: { exists: false } }) + '\n')
           return
+        }
+        if (request.tool === 'list_files' && request.arguments.path === join(process.cwd(), '.skills')) {
+          socket.end(JSON.stringify({ id: request.id, ok: true, result: {
+            entries: [{ name: 'empty-skill', type: 'dir', size: 4096, mtime_ms: 1 }], truncated: false,
+          } }) + '\n')
+          return
+        }
+        if ((request.tool === 'write_file' || request.tool === 'write_stdin') && (
+          calls.filter(call => call.tool === 'list_files').length !== 1
+          || !statKeys.has(`S:${join(process.cwd(), '.skills/empty-skill/SKILL.md')}`)
+        )) {
+          unlinkSync(socketPath)
+          throw new Error('runtime-broker snapshot: raw directory responses did not reach skill discovery')
         }
         if (mode === 'write-quota' && request.tool === 'write_file') { quota(); return }
         if (mode === 'command-quota' && request.tool === 'exec_command') {
