@@ -39,6 +39,27 @@ describe('BrokerFileSystem', () => {
     ])
   })
 
+  it('normalizes raw broker directory types for discovery and listing entries', async () => {
+    const directory = { exists: true, type: 'dir', size: 4096, mode: 0o755, mtime_ms: 1 }
+    const invoke = vi.fn(async (tool: string) => tool === 'stat_file'
+      ? directory
+      : { entries: [{ name: 'application-policy', ...directory }], truncated: false })
+    const fs = filesystem({ invoke })
+    const root = await fs.resolve('/workspace/.skills')
+
+    for (let turn = 0; turn < 11; turn++) {
+      expect(await fs.stat(root)).toMatchObject({ type: 'directory', size: 4096 })
+      expect(await fs.lstat('/workspace/.skills')).toMatchObject({ type: 'directory', size: 4096 })
+    }
+    expect(invoke).toHaveBeenCalledTimes(2)
+    expect(await fs.listDir(root)).toEqual([{
+      name: 'application-policy', type: 'directory', size: 4096,
+      target: await fs.resolve('/workspace/.skills/application-policy'),
+      version: FsVersion('broker:/workspace/.skills/application-policy:directory:4096:1'),
+    }])
+    expect(invoke.mock.calls.map(([tool]) => tool)).toEqual(['stat_file', 'stat_file', 'stat_file', 'list_files'])
+  })
+
   it('rejects a broker list response with files instead of entries', async () => {
     const fs = filesystem({
       async invoke(tool) {
