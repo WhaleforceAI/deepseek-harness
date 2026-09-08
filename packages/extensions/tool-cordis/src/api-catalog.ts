@@ -1288,6 +1288,46 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'runtimeBroker',
+    summary: 'Shared owner for a single Runtime bridge lease; never reuse across runs.',
+    description: 'Shared owner for a single Runtime bridge lease; never reuse across runs.',
+    methods: [
+      {
+        signature: 'invalidate(): void',
+        description: 'Advance the observation generation, including listing contradictions.',
+        parameters: [],
+      },
+      {
+        signature: 'assertAvailable(signal?: AbortSignal): void',
+        description: 'Reject terminal, disposed, or aborted work before using cached data or opening a socket.',
+        parameters: [{ name: 'signal', description: 'optional caller cancellation.' }],
+      },
+      {
+        signature: 'onTerminal(listener: (error: BrokerInvokeError) => void): () => void',
+        description: 'Subscribe to the first quota denial.',
+        parameters: [{ name: 'listener', description: 'synchronous run-cancellation callback.' }],
+        returns: 'subscription disposer.',
+      },
+      {
+        signature: 'onListing(listener: (path: string, result: unknown) => void): () => void',
+        description: 'Subscribe to successful listings, including native-tool calls.',
+        parameters: [{ name: 'listener', description: 'synchronous cache observation callback; validates its own listing data.' }],
+        returns: 'subscription disposer.',
+      },
+      {
+        signature: 'dispose(): void',
+        description: 'Close transport work; Python Runtime owns quota-exempt remote run completion.',
+        parameters: [],
+      },
+      {
+        signature: 'async invoke(tool: string, args: unknown, signal?: AbortSignal): Promise<unknown>',
+        description: 'Invoke an ordinary broker operation while tracking all mutation paths.',
+        parameters: [{ name: 'tool', description: 'broker operation name.' }, { name: 'args', description: 'JSON operation arguments.' }, { name: 'signal', description: 'caller cancellation.' }],
+        returns: 'validated bridge result; operation-specific validation belongs to the provider.',
+      },
+    ],
+  },
+  {
     key: 'sandbox',
     summary: 'Abstract process-sandbox service.',
     description: 'Abstract process-sandbox service. confine must return enforcing argv or fail closed at wrap or runner-execution time; silent unconfined passthrough is forbidden. Functional probes arbitrate multi-runner chains and may be skipped for a sole candidate, whose own refusal remains the fail-closed end.',
@@ -3617,6 +3657,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'BrandedNumber',
     declaration: 'export type BrandedNumber<B extends string> = number & {\n    readonly [BRAND]: B;\n};',
+  },
+  {
+    name: 'BrokerInvokeError',
+    declaration: 'export class BrokerInvokeError extends Error {\n    constructor(readonly code: string, readonly status: number);\n}',
   },
   {
     name: 'ChunkRow',

@@ -1,0 +1,96 @@
+# Keyless replay uses the same real broker composition and fixture.
+
+- id: llm-deepseek
+  disabled: true
+
+- id: plugin-package-inventory-deepseek
+  disabled: true
+
+- id: session-title-llm
+  disabled: true
+
+- id: session-persistence-jsonl
+  config:
+    root: !!js dshHomePath('sessions')
+    compression: none
+
+- id: subprocess
+  disabled: true
+
+- id: fs-sandbox
+  disabled: true
+
+- id: sandbox
+  disabled: true
+
+- id: sandbox-policy
+  disabled: true
+
+- id: bash-sandbox
+  disabled: true
+
+- id: pwsh-sandbox
+  disabled: true
+
+- id: tool-pwsh
+  disabled: true
+
+- id: approval
+  disabled: true
+
+- id: permission
+  disabled: true
+
+- id: skill-filesystem
+  config:
+    includeDefaultRoots: false
+    customSkillDirs: !!js "[process.cwd() + '/.skills']"
+    watch: false
+
+- insert:
+    - id: llm-replay
+      name: '@deepseek-ai/dsh-llm-replay'
+      config:
+        providers:
+          - id: deepseek-official
+            name: DeepSeek
+            models:
+              - id: deepseek-v4-flash
+
+    - id: runtime-broker-fixture
+      name: './runtime-broker-fixture.mjs'
+
+    - id: subprocess-broker
+      name: '@deepseek-ai/dsh-subprocess-broker'
+      config:
+        cwd: !!js process.cwd()
+        pollMs: 1
+
+    - id: fs-broker
+      name: '@deepseek-ai/dsh-fs-broker'
+      config:
+        cwd: !!js process.cwd()
+
+    - id: bash
+      name: '@deepseek-ai/dsh-bash-local'
+      config:
+        cwd: !!js process.cwd()
+        timeoutMs: 60000
+
+    - id: runtime-broker-tools
+      name: '@deepseek-ai/dsh-runtime-broker'
+      config:
+        socketPath: !!js process.cwd() + '/.runtime-broker.sock'
+        secret: snapshot-runtime-broker-secret-0001
+        cacheDiscovery: true
+        tools:
+          - name: write_file
+            description: Write a file through the Runtime broker.
+            inputSchema:
+              type: object
+              properties:
+                path: { type: string }
+                content: { type: string }
+              required: [path, content]
+              additionalProperties: false
+            outputLimitBytes: 1024

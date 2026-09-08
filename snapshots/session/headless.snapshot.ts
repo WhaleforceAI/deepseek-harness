@@ -90,36 +90,39 @@ function propertyName(node: ts.PropertyName): string | undefined {
   return undefined
 }
 
-function bindsOsAssignedPort(argument: ts.Expression | undefined): boolean {
+function usesOwnedListenerAddress(argument: ts.Expression | undefined): boolean {
   if (argument === undefined) return false
   if (ts.isNumericLiteral(argument)) return Number(argument.text) === 0
   if (!ts.isObjectLiteralExpression(argument)) return false
   let portIsZero: boolean | undefined
+  let unixSocket = false
   for (const property of argument.properties) {
     if (ts.isSpreadAssignment(property)) {
       portIsZero = undefined
       continue
     }
-    if (propertyName(property.name) !== 'port') continue
+    const name = propertyName(property.name)
+    if (name === 'path') unixSocket = true
+    if (name !== 'port') continue
     portIsZero = ts.isPropertyAssignment(property)
       && ts.isNumericLiteral(property.initializer)
       && Number(property.initializer.text) === 0
   }
-  return portIsZero === true
+  return portIsZero === true || unixSocket
 }
 
-function listenerPortViolations(path: string, sourceText: string): string[] {
+function listenerAddressViolations(path: string, sourceText: string): string[] {
   const source = ts.createSourceFile(path, sourceText, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS)
   const violations: string[] = []
   const visit = (node: ts.Node): void => {
     if (ts.isCallExpression(node)
       && ts.isPropertyAccessExpression(node.expression)
       && node.expression.name.text === 'listen'
-      && !bindsOsAssignedPort(node.arguments[0])) {
+      && !usesOwnedListenerAddress(node.arguments[0])) {
       const line = source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1
       const received = node.arguments[0]?.getText(source) ?? '<missing>'
       violations.push(
-        `${path}:${line}: listener port ${received} must use listen(0, ...) or listen({ port: 0, ... })`,
+        `${path}:${line}: listener address ${received} must use an OS-assigned port or an owned Unix-socket path`,
       )
     }
     ts.forEachChild(node, visit)
@@ -551,27 +554,50 @@ describe('headless recorded-session snapshots', () => {
     }
   })
 
-  it('recognizes the supported OS-assigned listener forms', () => {
-    expect(listenerPortViolations('accepted.mjs', [
+  it('recognizes supported owned listener addresses', () => {
+    expect(listenerAddressViolations('accepted.mjs', [
       "server.listen(0, '127.0.0.1')",
       "server.listen({ port: 0, host: '127.0.0.1' })",
       'server.listen({ ...options, port: 0 })',
+      'server.listen({ path: socketPath })',
     ].join('\n'))).toEqual([])
-    expect(listenerPortViolations('fixed.mjs', 'server.listen(43118)')).toEqual([
-      'fixed.mjs:1: listener port 43118 must use listen(0, ...) or listen({ port: 0, ... })',
+    expect(listenerAddressViolations('fixed.mjs', 'server.listen(43118)')).toEqual([
+      'fixed.mjs:1: listener address 43118 must use an OS-assigned port or an owned Unix-socket path',
     ])
-    expect(listenerPortViolations('dynamic.mjs', 'server.listen({ port, ...options })')).toEqual([
-      'dynamic.mjs:1: listener port { port, ...options } must use listen(0, ...) or listen({ port: 0, ... })',
+    expect(listenerAddressViolations('dynamic.mjs', 'server.listen({ port, ...options })')).toEqual([
+      'dynamic.mjs:1: listener address { port, ...options } must use an OS-assigned port or an owned Unix-socket path',
     ])
   })
 
-  it('binds scenario HTTP fixtures only to OS-assigned ports', async () => {
+  it('binds scenario network fixtures only to owned addresses', async () => {
     const fixtureNames = (await readdir(snapshotsRoot, { recursive: true })).filter(name => name.endsWith('.mjs'))
-    const violations = (await Promise.all(fixtureNames.map(async (fixtureName) => listenerPortViolations(
+    const violations = (await Promise.all(fixtureNames.map(async (fixtureName) => listenerAddressViolations(
       fixtureName,
       await readFile(join(snapshotsRoot, fixtureName), 'utf8'),
     )))).flat()
     expect(violations).toEqual([])
+  })
+
+  it('pins Runtime broker quota as terminal at discovery, tool, and command boundaries', async () => {
+    const quotaReason = {
+      kind: 'aborted',
+      reason: { kind: 'hook', reason: 'runtime-broker: run_quota_exceeded' },
+    }
+    const expectations = [
+      ['runtime-broker-discovery-quota', 0, false],
+      ['runtime-broker-command-quota', 1, true],
+      ['runtime-broker-quota', 2, true],
+    ] as const
+    for (const [name, steps, hasToolError] of expectations) {
+      const log = await readFile(join(snapshotsRoot, name, 'session.jsonl'), 'utf8')
+      const events = records(log)
+      expect(events.filter(event => event.type === 'step/start'), `${name}: model request count`).toHaveLength(steps)
+      expect(turnReasonFromSession(log), `${name}: terminal quota reason`).toEqual(quotaReason)
+      expect(log.includes('AggregateError'), `${name}: original quota error`).toBe(false)
+      expect(events.some(event => event.type === 'tool/result'
+        && JSON.stringify(event).includes('Error: runtime-broker: run_quota_exceeded')), `${name}: tool error`)
+        .toBe(hasToolError)
+    }
   })
 
   it('stores session-owned inputs with typed redaction and no ACP transcript', async () => {

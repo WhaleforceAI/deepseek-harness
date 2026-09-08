@@ -1,0 +1,12 @@
+version: 1
+scenario: runtime-broker-command-quota
+profile: headless
+composition: runtime-broker
+recording: authored
+header:
+  class: runtime-broker
+replay:
+  override: true
+environment:
+  DSH_RUNTIME_BROKER_FIXTURE_MODE: command-quota
+platform: posix

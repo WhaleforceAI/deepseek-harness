@@ -714,19 +714,17 @@ Source: [`packages/context/file-reference-local/src/index.ts:34`](../packages/co
 
 ## `@deepseek-ai/dsh-fs-broker`
 
+Requires: `runtimeBroker`
+
 ```ts config-catalog
 /** Configuration for the filesystem provider backed by an Agent Runtime broker. */
 export interface Config {
-  /** Absolute Unix-socket path for the run-local broker. */
-  socketPath: string
-  /** Run-local broker authentication secret. */
-  secret: string
   /** Base path for relative filesystem requests. */
   cwd?: string
 }
 ```
 
-Source: [`packages/runtime/fs-broker/src/index.ts:31`](../packages/runtime/fs-broker/src/index.ts)
+Source: [`packages/runtime/fs-broker/src/index.ts:33`](../packages/runtime/fs-broker/src/index.ts)
 
 <a id="deepseek-aidsh-fs-local"></a>
 
@@ -1710,21 +1708,26 @@ Source: [`packages/guard/repeat-tool-reminder/src/index.ts:28`](../packages/guar
 
 ## `@deepseek-ai/dsh-runtime-broker`
 
-Requires: `tools`
+Requires: `tools` · `agents`
 
 ```ts config-catalog
+/** Shared bridge settings and its native tool registrations. */
 export interface Config extends BrokerBridgeConfig {
   /** Native broker tools to register; an empty list registers none. */
   tools?: NativeBrokerTool[]
 }
 
+/** Run lease authentication and discovery-reuse policy. */
 export interface BrokerBridgeConfig {
   /** Absolute Unix socket path for this run’s Runtime bridge. */
   socketPath: string
   /** Run-scoped bridge authentication secret, at least 32 characters. */
   secret: string
+  /** Enable discovery reuse only when this run exclusively owns workspace mutations. */
+  cacheDiscovery?: boolean
 }
 
+/** Native tool definition forwarded to the shared broker. */
 export interface NativeBrokerTool {
   /** Broker tool name registered with the Harness tool registry. */
   name: string
@@ -1737,7 +1740,7 @@ export interface NativeBrokerTool {
 }
 ```
 
-Source: [`packages/runtime/broker/src/index.ts:29`](../packages/runtime/broker/src/index.ts)
+Source: [`packages/runtime/broker/src/index.ts:35`](../packages/runtime/broker/src/index.ts)
 
 <a id="deepseek-aidsh-sandbox-local"></a>
 
@@ -2532,13 +2535,11 @@ Source: [`packages/subagent/subagent-spawn-in-process/src/index.ts:25`](../packa
 
 ## `@deepseek-ai/dsh-subprocess-broker`
 
+Requires: `runtimeBroker`
+
 ```ts config-catalog
 /** Configuration for the Agent Runtime broker subprocess provider. */
 export interface Config {
-  /** Absolute Unix-socket path for the run-local broker. */
-  socketPath: string
-  /** Run-local broker authentication secret. */
-  secret: string
   /** Base path used to resolve a relative PATH result. */
   cwd?: string
   /** Delay between remote command polls in milliseconds. */
@@ -2546,7 +2547,7 @@ export interface Config {
 }
 ```
 
-Source: [`packages/runtime/subprocess-broker/src/index.ts:38`](../packages/runtime/subprocess-broker/src/index.ts)
+Source: [`packages/runtime/subprocess-broker/src/index.ts:39`](../packages/runtime/subprocess-broker/src/index.ts)
 
 <a id="deepseek-aidsh-subprocess-e2b"></a>
 

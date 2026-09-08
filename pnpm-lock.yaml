@@ -6631,9 +6631,15 @@ importers:
       '@deepseek-ai/cordis':
         specifier: workspace:^
         version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-agent':
+        specifier: workspace:^
+        version: link:../../core/agent
       '@deepseek-ai/dsh-invariants':
         specifier: workspace:^
         version: link:../../runtime-diagnostics/invariants
+      '@deepseek-ai/dsh-system-prompt':
+        specifier: workspace:^
+        version: link:../../core/system-prompt
       '@deepseek-ai/dsh-tools':
         specifier: workspace:^
         version: link:../../core/tools
@@ -6656,6 +6662,9 @@ importers:
       '@deepseek-ai/dsh-runtime-broker':
         specifier: workspace:^
         version: link:../broker
+      '@deepseek-ai/dsh-subprocess-broker':
+        specifier: workspace:^
+        version: link:../subprocess-broker
 
   packages/runtime/launcher:
     dependencies:

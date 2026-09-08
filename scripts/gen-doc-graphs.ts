@@ -449,6 +449,14 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'Owns one shared E2B SDK handle, remote working directory, and final sandbox disposition so both fundamental E2B providers inhabit the same Linux runtime.',
   },
   {
+    key: 'runtimeBroker',
+    pkg: 'runtime-broker',
+    title: 'Agent Runtime broker run owner',
+    mode: 'core',
+    consumers: ['fs-broker', 'subprocess-broker'],
+    note: 'Owns shared transport, mutation generations, and terminal quota state for one Runtime lease; native tools use the same owner.',
+  },
+  {
     key: 'subprocess',
     pkg: 'subprocess',
     title: 'Subprocess seam',

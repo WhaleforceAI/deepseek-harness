@@ -273,6 +273,47 @@ async getSandbox(): Promise<Sandbox>
 
 Source: [`packages/e2b/e2b/src/index.ts`](../../packages/e2b/e2b/src/index.ts)
 
+<a id="ctxruntimebroker--brokerbridge"></a>
+
+### `ctx.runtimeBroker` — `BrokerBridge`
+
+Shared owner for a single Runtime bridge lease; never reuse across runs.
+
+```ts cordis-catalog
+/** Advance the observation generation, including listing contradictions. */
+invalidate(): void
+
+/** Reject terminal, disposed, or aborted work before using cached data or opening a socket.
+ * @param signal - optional caller cancellation.
+ */
+assertAvailable(signal?: AbortSignal): void
+
+/** Subscribe to the first quota denial.
+ * @param listener - synchronous run-cancellation callback.
+ * @returns subscription disposer.
+ */
+onTerminal(listener: (error: BrokerInvokeError) => void): () => void
+
+/** Subscribe to successful listings, including native-tool calls.
+ * @param listener - synchronous cache observation callback; validates its own listing data.
+ * @returns subscription disposer.
+ */
+onListing(listener: (path: string, result: unknown) => void): () => void
+
+/** Close transport work; Python Runtime owns quota-exempt remote run completion. */
+dispose(): void
+
+/** Invoke an ordinary broker operation while tracking all mutation paths.
+ * @param tool - broker operation name.
+ * @param args - JSON operation arguments.
+ * @param signal - caller cancellation.
+ * @returns validated bridge result; operation-specific validation belongs to the provider.
+ */
+async invoke(tool: string, args: unknown, signal?: AbortSignal): Promise<unknown>
+```
+
+Source: [`packages/runtime/broker/src/index.ts`](../../packages/runtime/broker/src/index.ts)
+
 <a id="ctxsubprocess--subprocessruntime-abstract-seam"></a>
 
 ### `ctx.subprocess` — `SubprocessRuntime` (abstract seam)

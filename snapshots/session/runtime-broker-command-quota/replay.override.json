@@ -1,0 +1,12 @@
+[
+  {
+    "kind": "chunks",
+    "chunks": [
+      { "type": "block-start", "index": 0, "blockType": "tool-call" },
+      { "type": "tool-call-delta", "index": 0, "id": "call_command_quota", "name": "bash", "argumentsDelta": "{\"command\":\"printf COMMAND_STARTED\",\"description\":\"Start brokered snapshot command\"}" },
+      { "type": "block-end", "index": 0, "block": { "type": "tool-call", "id": "call_command_quota", "name": "bash", "arguments": "{\"command\":\"printf COMMAND_STARTED\",\"description\":\"Start brokered snapshot command\"}" } },
+      { "type": "usage", "usage": { "inputTokens": 10, "outputTokens": 5 } },
+      { "type": "finish", "reason": { "kind": "tool-calls" } }
+    ]
+  }
+]

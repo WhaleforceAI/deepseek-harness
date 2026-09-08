@@ -1,5 +1,6 @@
 import { Buffer } from 'node:buffer'
 import { Context } from '@deepseek-ai/cordis'
+import { BrokerBridge, BrokerInvokeError } from '@deepseek-ai/dsh-runtime-broker'
 import { FsVersion } from '@deepseek-ai/dsh-fs'
 import BrokerFileSystem from '../src/index.ts'
 import { describe, expect, it, vi } from 'vitest'
@@ -9,7 +10,9 @@ interface FakeBridge {
 }
 
 function filesystem(bridge: FakeBridge): BrokerFileSystem {
-  return new BrokerFileSystem(new Context(), { socketPath: '/run/broker.sock', secret: 'x'.repeat(32) }, bridge)
+  const owner = new BrokerBridge({ cacheDiscovery: true, socketPath: '/run/broker.sock', secret: 'x'.repeat(32) })
+  owner.invoke = bridge.invoke.bind(bridge)
+  return new BrokerFileSystem(new Context(), {}, owner)
 }
 
 describe('BrokerFileSystem', () => {
@@ -75,7 +78,7 @@ describe('BrokerFileSystem', () => {
     const fs = filesystem({
       async invoke(tool, args) {
         const request = args as Record<string, unknown>
-        if (tool === 'stat_file') return content === undefined ? undefined : { type: 'file', size: content.length, mtime_ms: mtime }
+        if (tool === 'stat_file') return content === undefined ? { exists: false } : { type: 'file', size: content.length, mtime_ms: mtime }
         if (tool === 'write_file') {
           expect(request).toMatchObject({ content: 'hello', encoding: 'utf-8', create_parents: false, mode: 0o600 })
           content = Buffer.from(request.content as string, 'utf8')
@@ -97,10 +100,10 @@ describe('BrokerFileSystem', () => {
     expect(await fs.readBytes(target, undefined, 5)).toEqual(new TextEncoder().encode('hello'))
   })
 
-  it('returns undefined for a missing stat result', async () => {
+  it('rejects a missing stat result', async () => {
     const fs = filesystem({ async invoke() { return undefined } })
 
-    expect(await fs.stat(await fs.resolve('missing.txt'))).toBeUndefined()
+    await expect(fs.stat(await fs.resolve('missing.txt'))).rejects.toThrow('invalid stat_file response')
   })
 
   it('returns undefined when the broker explicitly reports a missing stat', async () => {
@@ -161,5 +164,150 @@ describe('BrokerFileSystem', () => {
     await expect(fs.writeText(target, 'next', { kind: 'replaceIfVersion', version: FsVersion('old') }))
       .rejects.toMatchObject({ code: 'FS_STALE_VERSION' })
     expect(invoke).toHaveBeenCalledTimes(1)
+  })
+})
+
+function cachedFilesystem(invoke: FakeBridge['invoke']): { fs: BrokerFileSystem; bridge: BrokerBridge } {
+  const bridge = new BrokerBridge({ cacheDiscovery: true, socketPath: '/run/broker.sock', secret: 'x'.repeat(32) })
+  bridge.invoke = invoke
+  return { fs: new BrokerFileSystem(new Context(), {}, bridge), bridge }
+}
+
+describe('discovery metadata cache', () => {
+  it('requires explicit workspace exclusivity opt-in', async () => {
+    const bridge = new BrokerBridge({ socketPath: '/run/broker.sock', secret: 'x'.repeat(32) })
+    const invoke = vi.fn(async () => ({ exists: false }))
+    bridge.invoke = invoke
+    const fs = new BrokerFileSystem(new Context(), {}, bridge)
+    const target = await fs.resolve('AGENTS.md')
+    await fs.stat(target)
+    await fs.stat(target)
+    expect(invoke).toHaveBeenCalledTimes(2)
+  })
+
+  it('bypasses and does not fill while the owner has an active mutation', async () => {
+    const invoke = vi.fn(async () => ({ exists: false }))
+    const { fs, bridge } = cachedFilesystem(invoke)
+    const allowed = vi.spyOn(bridge, 'cacheAllowed', 'get').mockReturnValue(false)
+    const target = await fs.resolve('AGENTS.md')
+    await fs.stat(target)
+    await fs.stat(target)
+    allowed.mockRestore()
+    await fs.stat(target)
+    await fs.stat(target)
+    expect(invoke).toHaveBeenCalledTimes(3)
+  })
+
+  it('reuses only the six discovery basenames, normalized and separated by symlink policy', async () => {
+    const invoke = vi.fn(async () => ({ exists: false }))
+    const { fs } = cachedFilesystem(invoke)
+    for (const name of ['AGENTS.md', 'CLAUDE.md', 'AGENTS.local.md', 'CLAUDE.local.md', '.git', '.skills']) {
+      const target = await fs.resolve(`nested/../${name}`)
+      await fs.stat(target)
+      await fs.stat(await fs.resolve(name))
+      await fs.lstat(name)
+      await fs.lstat(`./${name}`)
+    }
+    expect(invoke).toHaveBeenCalledTimes(12)
+    for (let count = 0; count < 2; count += 1) await fs.stat(await fs.resolve('ordinary.txt'))
+    expect(invoke).toHaveBeenCalledTimes(14)
+  })
+
+  it('caches only structured workspace rejection and preserves the original cause', async () => {
+    const denial = new BrokerInvokeError('file_path_outside_workspace', 422)
+    const invoke = vi.fn(async () => { throw denial })
+    const { fs } = cachedFilesystem(invoke)
+    for (let count = 0; count < 2; count += 1) {
+      await expect(fs.stat(await fs.resolve('/AGENTS.md'))).rejects.toMatchObject({ cause: denial })
+    }
+    expect(invoke).toHaveBeenCalledTimes(1)
+  })
+
+  it.each([
+    new Error('runtime-broker: file_path_outside_workspace'),
+    new BrokerInvokeError('file_path_outside_workspace', 403),
+    new BrokerInvokeError('run_quota_exceeded', 403),
+    new BrokerInvokeError('token_expired', 403),
+    new Error('socket disconnected'),
+  ])('does not cache transient or non-workspace failure %s', async (error) => {
+    const invoke = vi.fn(async () => { throw error })
+    const { fs } = cachedFilesystem(invoke)
+    const target = await fs.resolve('AGENTS.md')
+    await expect(fs.stat(target)).rejects.toThrow()
+    await expect(fs.stat(target)).rejects.toThrow()
+    expect(invoke).toHaveBeenCalledTimes(2)
+  })
+
+  it.each([undefined, null, {}, { type: 'file', size: -1, mtime_ms: 1 },
+    { exists: 'false', type: 'file', size: 1, mtime_ms: 1 }])('does not cache malformed metadata %s', async (response) => {
+    const invoke = vi.fn(async () => response)
+    const { fs } = cachedFilesystem(invoke)
+    const target = await fs.resolve('AGENTS.md')
+    await expect(fs.stat(target)).rejects.toThrow()
+    await expect(fs.stat(target)).rejects.toThrow()
+    expect(invoke).toHaveBeenCalledTimes(2)
+  })
+
+  it('checks abort and terminal state before a cached success', async () => {
+    const invoke = vi.fn(async () => ({ exists: false }))
+    const { fs, bridge } = cachedFilesystem(invoke)
+    const target = await fs.resolve('AGENTS.md')
+    await fs.stat(target)
+    await expect(fs.stat(target, AbortSignal.abort())).rejects.toMatchObject({ code: 'FS_ABORTED' })
+    const quota = new BrokerInvokeError('run_quota_exceeded', 403)
+    vi.spyOn(bridge, 'assertAvailable').mockImplementation(() => { throw quota })
+    await expect(fs.stat(target)).rejects.toBe(quota)
+    expect(invoke).toHaveBeenCalledTimes(1)
+  })
+
+  it('drops a stat fill that settles after invalidation', async () => {
+    let finish!: (value: unknown) => void
+    const invoke = vi.fn<FakeBridge['invoke']>()
+      .mockImplementationOnce(() => new Promise((resolve) => { finish = resolve }))
+      .mockResolvedValue({ type: 'file', size: 1, mtime_ms: 2 })
+    const { fs, bridge } = cachedFilesystem(invoke)
+    const target = await fs.resolve('AGENTS.md')
+    const pending = fs.stat(target)
+    bridge.invalidate()
+    finish({ exists: false })
+    await pending
+    expect(await fs.stat(target)).toMatchObject({ type: 'file' })
+    await fs.stat(target)
+    expect(invoke).toHaveBeenCalledTimes(2)
+  })
+
+  it('bounds cache storage at 256 entries and starts each run empty', async () => {
+    const invoke = vi.fn(async () => ({ exists: false }))
+    const { fs } = cachedFilesystem(invoke)
+    for (let count = 0; count < 257; count += 1) await fs.stat(await fs.resolve(`${count}/AGENTS.md`))
+    await fs.stat(await fs.resolve('256/AGENTS.md'))
+    expect(invoke).toHaveBeenCalledTimes(257)
+    await fs.stat(await fs.resolve('0/AGENTS.md'))
+    expect(invoke).toHaveBeenCalledTimes(258)
+    const fresh = cachedFilesystem(invoke).fs
+    await fresh.stat(await fresh.resolve('256/AGENTS.md'))
+    expect(invoke).toHaveBeenCalledTimes(259)
+  })
+
+  it('reads and streams fresh discovery-file sizes and rejects stale edit/write guards', async () => {
+    let content = 'a'
+    let mtime = 1
+    const invoke = vi.fn(async (tool: string) => tool === 'stat_file'
+      ? { type: 'file', size: content.length, mtime_ms: mtime }
+      : { content: Buffer.from(content).toString('base64') })
+    const { fs } = cachedFilesystem(invoke)
+    const target = await fs.resolve('AGENTS.md')
+    const original = await fs.stat(target)
+    content = 'fresh'
+    mtime += 1
+    expect(await fs.readText(target)).toBe('fresh')
+    let streamed = ''
+    for await (const chunk of await fs.streamText(target)) streamed += chunk
+    expect(streamed).toBe('fresh')
+    await expect(fs.editText(target, { oldString: 'fresh', newString: 'next', replaceAll: false }, { version: original!.version }))
+      .rejects.toMatchObject({ code: 'FS_STALE_VERSION' })
+    await expect(fs.writeText(target, 'next', { kind: 'replaceIfVersion', version: original!.version }))
+      .rejects.toMatchObject({ code: 'FS_STALE_VERSION' })
+    expect(invoke.mock.calls.filter(([tool]) => tool === 'write_file')).toHaveLength(0)
   })
 })

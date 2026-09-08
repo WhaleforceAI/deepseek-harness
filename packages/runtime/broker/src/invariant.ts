@@ -11,8 +11,8 @@ export const name = 'runtime-broker-invariant'
 export const inject = ['invariants']
 
 /**
- * No runtime invariant: the bridge is a stateless authenticated transport and
- * validates every request and response at its private Unix-socket boundary.
+ * No runtime invariant: mutation state has one owner and no independent
+ * observation to compare. The bridge validates private Unix-socket responses.
  */
 const install: InvariantInstaller = () => {}
 

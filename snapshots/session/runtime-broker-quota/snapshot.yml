@@ -1,0 +1,11 @@
+version: 1
+scenario: runtime-broker-quota
+profile: headless
+composition: runtime-broker
+recording: authored
+header:
+  class: runtime-broker
+  pin: true
+replay:
+  override: true
+platform: posix

@@ -1,0 +1,10 @@
+version: 1
+scenario: runtime-broker-discovery-quota
+profile: headless
+composition: runtime-broker
+recording: authored
+header:
+  class: runtime-broker
+environment:
+  DSH_RUNTIME_BROKER_FIXTURE_MODE: discovery-quota
+platform: posix

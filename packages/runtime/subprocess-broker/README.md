@@ -23,21 +23,17 @@ kind: "package-reference"
 <a id="use-this-package"></a>
 ## Use this package
 
-Mount the provider with the same socket path and secret used by other `dsh-runtime-broker` consumers. Load ordinary subprocess consumers such as `dsh-bash-local`, `dsh-terminal-bash`, and `dsh-lsp-stdio` above it.
+Mount `dsh-runtime-broker` first; this provider injects its shared `ctx.runtimeBroker` service. Configure the run socket path and secret on that owner. Load ordinary subprocess consumers such as `dsh-bash-local`, `dsh-terminal-bash`, and `dsh-lsp-stdio` above it.
 
 ```yaml
 - name: '@deepseek-ai/dsh-subprocess-broker'
   config:
-    socketPath: /run/agent-runtime/broker.sock
-    secret: broker-secret-from-the-run
     cwd: /workspace
     pollMs: 100
 ```
 
 | Field | Default | Meaning |
 |---|---|---|
-| `socketPath` | required | Absolute Unix-socket path for the run-local broker. |
-| `secret` | required | Broker authentication secret. |
 | `cwd` | `/workspace` | Working directory used by executable lookup. |
 | `pollMs` | `100` | Delay between remote command status polls. |
 
@@ -47,6 +43,8 @@ The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-a
 ## Understand the implementation
 
 `spawn()` sends the supplied argument array unchanged as `argv`; it never converts the request into a shell string. The first broker response publishes the session, then bounded host-side readers append each polling response. `spawnTerminal()` uses the same lifecycle with `tty: true`, a writable input adapter, and one combined terminal output stream. Abort and service disposal issue the broker's `kill` action and await the final response.
+
+Quota exhaustion is terminal for the shared run. Handles preserve the first quota error, including when another provider triggers cancellation. Ordinary `kill` calls also consume quota, so exhaustion delegates remote cleanup to Python Runtime's quota-exempt run completion; local handle settlement alone does not confirm remote termination.
 
 `resolveExecutable()` follows the subprocess Service Definition: it rejects relative paths containing `/`, verifies absolute paths with `test`, and resolves bare names with `command -v` in the remote world. Shell syntax is restricted to that provider-owned lookup operation and is never used for `spawn()`.
 

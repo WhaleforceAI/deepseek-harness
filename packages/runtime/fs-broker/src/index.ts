@@ -18,32 +18,29 @@ import type {
   FsWriteIntent,
   FsWriteOutcome,
 } from '@deepseek-ai/dsh-fs'
-import { BrokerBridge } from '@deepseek-ai/dsh-runtime-broker'
+import { BrokerInvokeError, type BrokerBridge } from '@deepseek-ai/dsh-runtime-broker'
 
 const MAX_READ_BYTES = 1_048_576
 const MAX_READ_OFFSET = 1_073_741_824
 const MAX_READABLE_BYTES = MAX_READ_OFFSET + MAX_READ_BYTES
 const MAX_WRITE_CHARACTERS = 1_048_576
 const MAX_LIST_ENTRIES = 10_000
+const DISCOVERY_NAMES = new Set(['AGENTS.md', 'CLAUDE.md', 'AGENTS.local.md', 'CLAUDE.local.md', '.git', '.skills'])
+const MAX_DISCOVERY_ENTRIES = 256
 const BASE64 = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/
 
 /** Configuration for the filesystem provider backed by an Agent Runtime broker. */
 export interface Config {
-  /** Absolute Unix-socket path for the run-local broker. */
-  socketPath: string
-  /** Run-local broker authentication secret. */
-  secret: string
   /** Base path for relative filesystem requests. */
   cwd?: string
 }
 
 type ResolvedConfig = Required<Config>
-type BrokerInvoker = Pick<BrokerBridge, 'invoke'>
+type BrokerInvoker = Pick<BrokerBridge, 'invoke' | 'generation' | 'cacheAllowed' | 'assertAvailable' | 'invalidate' | 'onListing' | 'terminalError'>
+type CachedStat = { stat: BrokerStat | undefined } | { error: BrokerInvokeError }
 
 /** Loader schema for {@link BrokerFileSystem}. */
 export const Config: z<Config> = z.object({
-  socketPath: z.string(),
-  secret: z.string(),
   cwd: z.string().default('/workspace'),
 })
 
@@ -92,8 +89,10 @@ function integer(value: unknown, field: string, operation: string): number {
 }
 
 function statResult(value: unknown, operation: string): BrokerStat | undefined {
-  if (value === undefined) return undefined
   const response = record(value, operation)
+  if (response.exists !== undefined && typeof response.exists !== 'boolean') {
+    throw new Error(`fs-broker: invalid ${operation} response exists`)
+  }
   if (response.exists === false) return undefined
   const type = response.type
   if (type !== 'file' && type !== 'directory' && type !== 'other' && type !== 'symlink') {
@@ -172,9 +171,12 @@ function literalEdit(content: string, request: FsEditRequest, path: string): str
 /** Filesystem backend whose operations run through a run-local Agent Runtime broker. */
 export class BrokerFileSystem extends FileSystem {
   static Config = Config
+  static inject = ['runtimeBroker']
 
   /** Validated configuration. */
   readonly config: ResolvedConfig
+  private readonly discovery = new Map<string, CachedStat>()
+  private discoveryGeneration = -1
   private readonly locks = new Map<string, Promise<unknown>>()
 
   /** @inheritdoc */
@@ -186,17 +188,16 @@ export class BrokerFileSystem extends FileSystem {
   constructor(
     ctx: Context,
     config: Config,
-    private readonly bridge: BrokerInvoker = new BrokerBridge(config),
+    private readonly bridge: BrokerInvoker = ctx.runtimeBroker,
   ) {
     super(ctx)
     // Rebuilt field by field rather than spread: the loader hands us a
     // schemastery instance, and spreading one drops its prototype.
     this.config = {
-      socketPath: config.socketPath,
-      secret: config.secret,
       cwd: config.cwd ?? '/workspace',
     }
     if (!this.config.cwd.startsWith('/')) throw new Error('fs-broker: cwd must be absolute')
+    ctx.effect(() => this.bridge.onListing((path, result) => { this.observeListing(path, result) }))
   }
 
   // The FileSystem contract makes `resolve` async and permits provider I/O.
@@ -224,7 +225,7 @@ export class BrokerFileSystem extends FileSystem {
   }
 
   override async stat(target: FsTarget, signal?: AbortSignal): Promise<FsInfo | undefined> {
-    const stat = await this.inspect(target.displayPath, true, signal)
+    const stat = await this.inspect(target.displayPath, true, signal, true)
     if (stat === undefined) return undefined
     return {
       version: this.version(target.displayPath, stat),
@@ -234,10 +235,11 @@ export class BrokerFileSystem extends FileSystem {
   }
 
   override async lstat(path: string, opts?: { cwd?: string }, signal?: AbortSignal): Promise<FsPathInfo | undefined> {
+    this.bridge.assertAvailable()
     assertNotAborted(signal, 'lstat')
     if (path.trim().length === 0) throw new FsError('file_path must be a non-empty string', 'FS_NOT_FOUND')
     const displayPath = posix.resolve(opts?.cwd ?? this.config.cwd, path)
-    const stat = await this.inspect(displayPath, false, signal)
+    const stat = await this.inspect(displayPath, false, signal, true)
     if (stat === undefined) return undefined
     return {
       version: this.version(displayPath, stat),
@@ -257,7 +259,7 @@ export class BrokerFileSystem extends FileSystem {
   }
 
   override async streamText(target: FsTarget, signal?: AbortSignal): Promise<AsyncIterable<string>> {
-    const info = await this.stat(target, signal)
+    const info = await this.inspect(target.displayPath, true, signal)
     if (info === undefined) throw new FsError(`cannot read "${target.displayPath}": not found`, 'FS_NOT_FOUND')
     if (info.type !== 'file' || info.size === undefined) {
       throw new FsError(`cannot read "${target.displayPath}": not a regular file`, 'FS_NOT_REGULAR_FILE')
@@ -304,7 +306,7 @@ export class BrokerFileSystem extends FileSystem {
   }
 
   override async listDir(target: FsTarget, signal?: AbortSignal): Promise<FsDirEntry[]> {
-    const info = await this.stat(target, signal)
+    const info = await this.inspect(target.displayPath, true, signal)
     if (info === undefined) throw new FsError(`cannot list "${target.displayPath}": not found`, 'FS_NOT_FOUND')
     if (info.type !== 'directory') throw new FsError(`cannot list "${target.displayPath}": not a directory`, 'FS_NOT_DIRECTORY')
     try {
@@ -335,14 +337,14 @@ export class BrokerFileSystem extends FileSystem {
       const existing = await this.requireWriteTarget(target, expected, signal)
       const before = existing === undefined ? null : await this.diffBasis(target, signal)
       await this.write(target, content, existing === undefined ? 0o600 : existing.mode, signal)
-      const info = await this.stat(target)
+      const info = await this.inspect(target.displayPath, true)
       if (info === undefined || info.type !== 'file') {
         throw new FsError(
           `cannot write "${target.displayPath}": broker did not publish a regular file`,
           'FS_IO_ERROR',
         )
       }
-      return { operation: existing === undefined ? 'create' : 'update', version: info.version, before, after: normalizeLineEndings(content) }
+      return { operation: existing === undefined ? 'create' : 'update', version: this.version(target.displayPath, info), before, after: normalizeLineEndings(content) }
     })
   }
 
@@ -363,30 +365,93 @@ export class BrokerFileSystem extends FileSystem {
       const before = normalizeLineEndings(raw)
       const after = literalEdit(before, edit, target.displayPath)
       await this.write(target, restoresCrlf(raw) ? after.replaceAll('\n', '\r\n') : after, existing.mode, signal)
-      const afterInfo = await this.stat(target)
+      const afterInfo = await this.inspect(target.displayPath, true)
       if (afterInfo === undefined || afterInfo.type !== 'file') {
         throw new FsError(
           `cannot edit "${target.displayPath}": broker did not publish a regular file`,
           'FS_IO_ERROR',
         )
       }
-      return { version: afterInfo.version, before, after }
+      return { version: this.version(target.displayPath, afterInfo), before, after }
     })
   }
 
-  private async inspect(path: string, followSymlinks: boolean, signal?: AbortSignal): Promise<BrokerStat | undefined> {
+  private syncDiscovery(): void {
+    if (this.discoveryGeneration === this.bridge.generation) return
+    this.discovery.clear()
+    this.discoveryGeneration = this.bridge.generation
+  }
+
+  private remember(key: string, value: CachedStat, generation: number): void {
+    if (generation !== this.bridge.generation || !this.bridge.cacheAllowed) return
+    if (this.discovery.size === MAX_DISCOVERY_ENTRIES && !this.discovery.has(key)) {
+      const oldest = this.discovery.keys().next().value
+      if (oldest !== undefined) this.discovery.delete(oldest)
+    }
+    this.discovery.set(key, value)
+  }
+
+  private observeListing(path: string, result: unknown): void {
+    let entries: BrokerListEntry[]
     try {
+      entries = listResult(result)
+    } catch {
+      // Native tools may return malformed data; it cannot establish metadata.
+      return
+    }
+    this.syncDiscovery()
+    for (const entry of entries) {
+      const entryPath = posix.resolve(this.config.cwd, path, entry.name)
+      for (const prefix of ['S', 'L']) {
+        const cached = this.discovery.get(`${prefix}:${entryPath}`)
+        if (cached === undefined) continue
+        // Listings describe links themselves, not their followed targets.
+        if (prefix === 'S' && entry.type === 'symlink') continue
+        if ('error' in cached || cached.stat === undefined ||
+          cached.stat.type !== entry.type || cached.stat.size !== entry.size ||
+          cached.stat.mtimeMs !== entry.mtimeMs || cached.stat.mode !== entry.mode) {
+          this.bridge.invalidate()
+          this.syncDiscovery()
+          return
+        }
+      }
+    }
+  }
+
+  private async inspect(path: string, followSymlinks: boolean, signal?: AbortSignal, discovery = false): Promise<BrokerStat | undefined> {
+    const normalized = posix.resolve(this.config.cwd, path)
+    const key = `${followSymlinks ? 'S' : 'L'}:${normalized}`
+    let cacheable = false
+    let generation = -1
+    try {
+      this.bridge.assertAvailable()
       assertNotAborted(signal, 'stat')
-      const stat = statResult(await this.bridge.invoke('stat_file', { path, follow_symlinks: followSymlinks }, signal), 'stat_file')
+      this.syncDiscovery()
+      generation = this.bridge.generation
+      cacheable = discovery && DISCOVERY_NAMES.has(posix.basename(normalized)) && this.bridge.cacheAllowed
+      const cached = cacheable ? this.discovery.get(key) : undefined
+      if (cached !== undefined) {
+        if ('error' in cached) throw cached.error
+        return cached.stat
+      }
+      const stat = statResult(await this.bridge.invoke('stat_file', { path: normalized, follow_symlinks: followSymlinks }, signal), 'stat_file')
+      this.bridge.assertAvailable()
       assertNotAborted(signal, 'stat')
+      if (cacheable) this.remember(key, { stat }, generation)
       return stat
     } catch (error: unknown) {
+      // Broker validation.py and e2b_adapter.py identify workspace rejection;
+      // errors.py gives this validation error HTTP 422, not a generic 403.
+      if (cacheable && signal?.aborted !== true && error instanceof BrokerInvokeError &&
+        error.code === 'file_path_outside_workspace' && error.status === 422) {
+        this.remember(key, { error }, generation)
+      }
       throw this.error(error, 'stat', path, signal)
     }
   }
 
   private async readAll(target: FsTarget, maxBytes: number, signal?: AbortSignal): Promise<Uint8Array> {
-    const info = await this.stat(target, signal)
+    const info = await this.inspect(target.displayPath, true, signal)
     if (info === undefined) throw new FsError(`cannot read "${target.displayPath}": not found`, 'FS_NOT_FOUND')
     if (info.type !== 'file' || info.size === undefined) throw new FsError(`cannot read "${target.displayPath}": not a regular file`, 'FS_NOT_REGULAR_FILE')
     this.requireReadableSize(target, info.size, maxBytes)
@@ -496,7 +561,9 @@ export class BrokerFileSystem extends FileSystem {
     }
   }
 
-  private error(error: unknown, operation: string, path: string, signal?: AbortSignal): FsError {
+  private error(error: unknown, operation: string, path: string, signal?: AbortSignal): FsError | BrokerInvokeError {
+    if (this.bridge.terminalError !== undefined) return this.bridge.terminalError
+    if (error instanceof BrokerInvokeError && error.code === 'run_quota_exceeded') return error
     if (error instanceof FsError) return error
     if (signal?.aborted === true) return new FsError(`${operation} aborted`, 'FS_ABORTED', { cause: error })
     return new FsError(`cannot ${operation} "${path}": ${String(error)}`, 'FS_IO_ERROR', { cause: error })
