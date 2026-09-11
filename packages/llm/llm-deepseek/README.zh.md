@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-`@deepseek-ai/dsh-llm-deepseek` 是 harness LLM 服务的 DeepSeek 直连适配器：它拥有 `deepseek-official` 提供方路由，并把 DeepSeek 的 chat-completions 协议格式翻译为 harness 的流式分片协议。借助它，组合可以流式调用 DeepSeek 模型，支持可配置的 thinking 与推理（reasoning）强度、向视觉模型发送图片，并浏览一份建议性模型目录。连接事实——端点、目录、密钥、thinking 策略——按请求解析，因此编辑用户设置文档即可改变下一个请求，无需重启。它是 DeepSeek 的两个结构不同适配器之一：pi-ai 孪生通过库与更多提供方服务自己的路由名，两者可以并排挂载。
+`@deepseek-ai/dsh-llm-deepseek` 是 harness LLM 服务的 DeepSeek 直连适配器：它拥有 `deepseek-official` 提供方路由，并把 DeepSeek 的 chat-completions 协议格式翻译为 harness 的流式分片协议。借助它，组合可以流式调用 DeepSeek 模型，支持可配置的 thinking 与推理（reasoning）强度、向视觉模型发送图片，并浏览一份建议性模型目录。连接事实——端点、目录、密钥、请求标头、thinking 策略——按请求解析，因此编辑用户设置文档即可改变下一个请求，无需重启。它是 DeepSeek 的两个结构不同适配器之一：pi-ai 孪生通过库与更多提供方服务自己的路由名，两者可以并排挂载。
 
 ## 目录
 
@@ -38,6 +38,8 @@ kind: "package-reference"
   config:
     apiKeyEnv: DEEPSEEK_API_KEY  # credential reference, resolved per request
     baseURL: https://api.deepseek.com # optional; $DEEPSEEK_BASE_URL then this default
+    requestHeaders:             # optional static, non-secret metadata
+      X-Opik-Project-Name: my-project
     reasoningEffort: high        # optional; off | low | high | max
     maxTokens: 256000            # optional per-request output cap
     maxRequestFilesBytes: 134217728
@@ -52,6 +54,7 @@ kind: "package-reference"
 |---|---|---|
 | `apiKeyEnv` | `DEEPSEEK_API_KEY` | 按请求解析的凭据引用：先经凭据 seam，再到环境变量 |
 | `baseURL` | `https://api.deepseek.com` | 端点基址；设置了 `$DEEPSEEK_BASE_URL` 时优先 |
+| `requestHeaders` | `{}` | 随 chat 与 Files API 请求发送的静态非机密标头 |
 | `thinking` | `enabled` | 部署策略；`disabled` 把所有请求锁定为 `off` |
 | `reasoningEffort` | `high` | 默认强度：`off`、`low`、`high` 或 `max` |
 | `maxTokens` | `256,000` | 单次请求输出上限；模型自身上限与显式请求值优先 |
@@ -84,7 +87,19 @@ Files 模式通过 `maxRequestFilesBytes` 与 `maxImagesPerRequest` 限制保留
 
 ### 动态配置
 
-连接事实通过可选 settings 与凭据 seam 每次操作重新读取一次。用户设置文档中的 `llm-deepseek:` 分节无需重启即可覆盖任何字段；未通过超 schema 上限的快照会保留最后有效事实并记录失败。API 密钥从提供端点、图片与 Files 策略及空闲预算的同一快照按流调用解析，因此被拒绝的设置代际不会贡献其中任何事实。图片请求在请求时解析附件服务，因此加载顺序不会冻结图片可用性。
+连接事实通过可选 settings 与凭据 seam 每次操作重新读取一次。用户设置文档中的 `llm-deepseek:` 分节无需重启即可覆盖任何字段；未通过超 schema 上限的快照会保留最后有效事实并记录失败。API 密钥从提供端点、请求标头、图片与 Files 策略及空闲预算的同一快照按流调用解析，因此被拒绝的设置代际不会贡献其中任何事实。图片请求在请求时解析附件服务，因此加载顺序不会冻结图片可用性。
+
+### 静态请求标头
+
+`requestHeaders?: Record<string, string>` 为发送到解析后 `baseURL` 的每个 chat 与 Files API 请求提供静态、非机密的可观测性元数据，包括已配置的 gateway。省略该字段或传入 `{}` 不会增加标头。标头变更遵循与端点相同的 settings 快照规则。
+
+适配器在路由注册前校验并复制该记录。记录最多包含 32 个条目。名称必须是非空 HTTP field-name token。名称按不区分大小写比较；`authorization`、`content-type`、`content-length`、`accept`、`host`、`user-agent`、`transfer-encoding`、`connection` 以及所有以 `x-deepseek-harness-` 开头的名称均为保留名称。值必须是仅包含可打印 ASCII 字符的非空字符串，最多 4096 字节。
+
+无效的初始配置抛出 `LlmError('INVALID_REQUEST_HEADER')`；无效的实时 settings 快照保留整份最近有效配置。诊断只指出标头名称和原因，不打印其值。
+
+适配器先应用已配置标头，再应用 harness 自有标头，因此 harness 的认证、内容协商、请求分帧、连接控制、归因与请求身份优先。Files 上传保留自动生成的 multipart 内容类型。凭据仍通过 `apiKeyEnv` 解析。
+
+配置值仅存在于 HTTP 标头中：适配器不会把它们放入请求正文、遥测、会话事件或模型输入。静态标头不增加 token，也不改变 harness 提示词或 KV-cache 前缀。
 
 ### 提供方专用请求字段
 
@@ -142,6 +157,7 @@ Files 模式通过 `maxRequestFilesBytes` 与 `maxImagesPerRequest` 限制保留
 - [插件包清单](../plugin-package-inventory-deepseek/README.zh.md)——默认启用的 `dsh_plugin_packages` 贡献。
 - [孪生 LLM 适配器](../../../.agents/notes/implemented/architecture/2026-06-13-twin-llm-adapters.zh.md)——为什么 DeepSeek 交付两个结构不同的适配器。
 - [强制应用归因标头](../../../.agents/notes/implemented/architecture/2026-06-21-mandatory-app-attribution-headers.zh.md)——每个提供方请求携带的身份。
+- [静态请求标头](../../../.agents/notes/implemented/feature/2026-09-11-deepseek-request-headers.zh.md)——为何支持有界非机密元数据，以及 harness 自有标头为何保持优先。
 
 -----
 
