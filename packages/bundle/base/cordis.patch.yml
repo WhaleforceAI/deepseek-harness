@@ -85,7 +85,7 @@
       name: '@deepseek-ai/dsh-llm-retry'
 
     # User-settings document (`$DSH_HOME/settings.yaml`, hot-reloaded): a
-    # `llm-deepseek:` or `llm-pi-ai:` section there overrides the adapter entries
+    # `llm-deepseek:` section there overrides the adapter entries
     # below without a restart, and is what the web Models page writes.
     - id: settings
       name: '@deepseek-ai/dsh-settings-file'
@@ -96,16 +96,6 @@
     # managed document, which is never materialized into the process environment.
     - id: credentials
       name: '@deepseek-ai/dsh-credentials-local'
-
-    # The pi-ai multi-provider twin, mounted dormant: zero routes (and no extra
-    # models in the picker) until a `llm-pi-ai:` settings section supplies provider
-    # profiles — then those routes register live, keys resolving per request
-    # through their apiKeyEnv references, and drop again when the section empties.
-    # Supplying those profiles is exactly what the web Models page does. Which
-    # adapters exist is composition; which providers run is the user's settings
-    # document.
-    - id: llm-pi-ai
-      name: '@deepseek-ai/dsh-llm-pi-ai'
 
     - id: session-persistence-jsonl
       name: '@deepseek-ai/dsh-session-persistence-jsonl'
