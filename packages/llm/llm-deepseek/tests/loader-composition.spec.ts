@@ -46,7 +46,13 @@ afterEach(async () => {
 })
 
 async function loadComposition(
-  options: { withDynamic: boolean; baseURL: string; reuseRoot?: string; enableSessionLog?: boolean },
+  options: {
+    withDynamic: boolean
+    baseURL: string
+    requestHeaders?: Record<string, string>
+    reuseRoot?: string
+    enableSessionLog?: boolean
+  },
 ): Promise<{ ctx: Context; settingsPath: string; credentialsPath: string }> {
   // A reused root is the restart case: the same harness home, its documents
   // exactly as the previous process left them.
@@ -95,6 +101,7 @@ async function loadComposition(
     "  name: '@deepseek-ai/dsh-llm-deepseek'",
     '  config:',
     `    baseURL: ${JSON.stringify(options.baseURL)}`,
+    `    requestHeaders: ${JSON.stringify(options.requestHeaders ?? {})}`,
     '',
   ].join('\n'))
 
@@ -141,6 +148,16 @@ async function loadComposition(
 }
 
 describe('llm-deepseek real dynamic composition', () => {
+  it('rejects horizontal tabs in request headers during Loader configuration without echoing values', async () => {
+    const failure: unknown = await loadComposition({
+      withDynamic: false,
+      baseURL: 'https://api.deepseek.com',
+      requestHeaders: { 'X-Trace': 'private-tab-marker\tvalue' },
+    }).then(() => undefined, (error: unknown) => error)
+    expect(failure).toMatchObject({ cause: { cause: { code: 'INVALID_REQUEST_HEADER' } } })
+    expect(failure instanceof Error ? failure.message : String(failure)).not.toContain('private-tab-marker')
+  })
+
   it('keeps session upload off and package inventory on by default in the real Loader composition', async () => {
     vi.stubEnv('DEEPSEEK_API_KEY', 'entry-key')
     const server = await mockServer([{ kind: 'sse', events: textEvents }])
@@ -251,11 +268,12 @@ describe('llm-deepseek real dynamic composition', () => {
     // reference, so the environment is the whole credential plane here.
     vi.stubEnv('DEEPSEEK_API_KEY', 'entry-key')
     const server = await mockServer([{ kind: 'sse', events: textEvents }])
-    const { ctx } = await loadComposition({ withDynamic: false, baseURL: server.url })
+    const { ctx } = await loadComposition({ withDynamic: false, baseURL: server.url, requestHeaders: { 'X-Opik-Trace-ID': 'loader-trace' } })
 
     expect(ctx.get('settings')).toBeUndefined()
     expect(ctx.get('credentials')).toBeUndefined()
     await assemble(ctx, { model: 'deepseek-v4-flash', messages: [] })
     expect(server.headers[0]?.authorization).toBe('Bearer entry-key')
+    expect(server.headers[0]?.['x-opik-trace-id']).toBe('loader-trace')
   })
 })
