@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-`@deepseek-ai/dsh-llm-deepseek` is the direct DeepSeek adapter for the harness LLM service: it owns the `deepseek-official` provider route and translates DeepSeek's chat-completions wire format into the harness stream-chunk protocol. With it a composition can stream DeepSeek models with configurable thinking and reasoning effort, send images to vision models, and browse an advisory model catalog. Connection facts — endpoint, catalog, key, thinking policy — resolve per request, so editing the user settings document changes the next request without a restart. It is one of two structurally different adapters for DeepSeek: the pi-ai twin serves its own route names through a library and additional providers, and both can be mounted side by side.
+`@deepseek-ai/dsh-llm-deepseek` is the direct DeepSeek adapter for the harness LLM service: it owns the `deepseek-official` provider route and translates DeepSeek's chat-completions wire format into the harness stream-chunk protocol. With it a composition can stream DeepSeek models with configurable thinking and reasoning effort, send images to vision models, and browse an advisory model catalog. Connection facts — endpoint, catalog, key, request headers, thinking policy — resolve per request, so editing the user settings document changes the next request without a restart. It is one of two structurally different adapters for DeepSeek: the pi-ai twin serves its own route names through a library and additional providers, and both can be mounted side by side.
 
 ## Table of Contents
 
@@ -39,6 +39,8 @@ Choose this adapter when the deployment targets DeepSeek's official API, optiona
     apiKeyEnv: DEEPSEEK_API_KEY  # credential reference, resolved per request
     baseURL: https://api.deepseek.com # optional; $DEEPSEEK_BASE_URL then this default
     wireDialect: deepseek        # optional; deepseek | openai-compatible
+    requestHeaders:             # optional static, non-secret metadata
+      X-Opik-Project-Name: my-project
     reasoningEffort: high        # optional; off | low | high | max
     maxTokens: 256000            # optional per-request output cap
     maxRequestFilesBytes: 134217728
@@ -54,6 +56,7 @@ A request selects the route with `provider: deepseek-official`; the model id pas
 | `apiKeyEnv` | `DEEPSEEK_API_KEY` | Credential reference resolved per request through the credentials seam, then the environment |
 | `baseURL` | `https://api.deepseek.com` | Endpoint base; `$DEEPSEEK_BASE_URL` wins when set |
 | `wireDialect` | `deepseek` | Request vocabulary; `openai-compatible` omits DeepSeek reasoning fields |
+| `requestHeaders` | `{}` | Static, non-secret headers sent with chat and Files API requests |
 | `thinking` | `enabled` | Deployment policy; `disabled` locks every request to `off` |
 | `reasoningEffort` | `high` | Default effort: `off`, `low`, `high`, or `max` |
 | `maxTokens` | `256,000` | Per-request output cap; a model's own cap and explicit request values win |
@@ -88,7 +91,19 @@ Files mode bounds retained request versions by `maxRequestFilesBytes` and `maxIm
 
 ### Dynamic configuration
 
-Connection facts are re-read once per operation through the optional settings and credentials seams. A `llm-deepseek:` section in the user settings document overrides any field without a restart; a snapshot that fails a beyond-schema bound keeps the last good facts and logs the failure. The API key resolves per stream call from the same snapshot that supplies the endpoint, image and Files policies, and idle budget, so a rejected settings generation contributes none of them. Image requests resolve the attachment service at request time, so load order does not freeze image availability.
+Connection facts are re-read once per operation through the optional settings and credentials seams. A `llm-deepseek:` section in the user settings document overrides any field without a restart; a snapshot that fails a beyond-schema bound keeps the last good facts and logs the failure. The API key resolves per stream call from the same snapshot that supplies the endpoint, request headers, image and Files policies, and idle budget, so a rejected settings generation contributes none of them. Image requests resolve the attachment service at request time, so load order does not freeze image availability.
+
+### Static request headers
+
+`requestHeaders?: Record<string, string>` supplies static, non-secret observability metadata to every chat and Files API request sent to the resolved `baseURL`, including a configured gateway. Omission and `{}` add no headers. Header changes follow the same settings snapshot rules as the endpoint.
+
+The adapter validates and copies the record before route registration. It accepts at most 32 entries. Each name must be a non-empty HTTP field-name token. Names are compared case-insensitively; `authorization`, `content-type`, `content-length`, `accept`, `host`, `user-agent`, `transfer-encoding`, `connection`, and every name beginning with `x-deepseek-harness-` are reserved. Each value must be a non-empty string of at most 4096 bytes containing only printable ASCII characters.
+
+Invalid initial configuration throws `LlmError('INVALID_REQUEST_HEADER')`; an invalid live settings snapshot retains the whole last-good configuration. Diagnostics identify the header name and reason without printing its value.
+
+The adapter applies configured headers before harness-owned headers, so harness authentication, content negotiation, request framing, connection control, attribution, and request identity win. Files uploads retain their generated multipart content type. Credentials still resolve through `apiKeyEnv`.
+
+Configured values remain in HTTP headers: the adapter does not put them in request bodies, telemetry, session events, or model input. Static headers add no tokens and do not change the harness prompt or KV-cache prefix.
 
 ### Provider-specific request fields
 
@@ -146,6 +161,7 @@ Read these pages when the package-level contract is not enough. They move from t
 - [Plugin package inventory](../plugin-package-inventory-deepseek/README.md) — the default-on `dsh_plugin_packages` contribution.
 - [Twin LLM adapters](../../../.agents/notes/implemented/architecture/2026-06-13-twin-llm-adapters.md) — why DeepSeek ships two structurally different adapters.
 - [Mandatory app attribution headers](../../../.agents/notes/implemented/architecture/2026-06-21-mandatory-app-attribution-headers.md) — the identity every provider request carries.
+- [Static request headers](../../../.agents/notes/implemented/feature/2026-09-11-deepseek-request-headers.md) — why bounded non-secret metadata is supported and harness-owned headers retain precedence.
 
 -----
 

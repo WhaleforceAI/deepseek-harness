@@ -188,6 +188,155 @@ describe('request image policy', () => {
   })
 })
 
+describe('static request headers', () => {
+  const requestHeaders = {
+    'X-Opik-Trace-ID': 'trace-observability-only',
+    'X-Opik-Parent-Span-ID': 'span-observability-only',
+    'X-Opik-Project-Name': 'project-observability-only',
+    'X-Opik-Thread-ID': 'thread-observability-only',
+    'X-Opik-Tags': 'tags-observability-only',
+    'x-litellm-session-id': 'session-observability-only',
+  }
+
+  it('sends configured chat headers without including their values in logs or stream events', async () => {
+    const server = await mockServer([{ kind: 'sse', events: textEvents }])
+    const ctx = await harness(server.url, { requestHeaders })
+    const logs: unknown[] = []
+    const dispose = ctx.logger.exporter({ levels: { default: 3 }, export: message => logs.push(message.args) })
+    const chunks = []
+    try {
+      for await (const chunk of ctx.llm.stream({ provider: 'deepseek-official', model: 'deepseek-v4-flash', messages: [] })) {
+        chunks.push(chunk)
+      }
+      expect(chunks).toContainEqual(expect.objectContaining({ type: 'finish', reason: { kind: 'stop' } }))
+      for (const [name, value] of Object.entries(requestHeaders)) {
+        expect(server.headers[0]?.[name.toLowerCase()]).toBe(value)
+        expect(JSON.stringify({ logs, chunks, body: server.requests })).not.toContain(value)
+      }
+      expect(server.headers[0]?.authorization).toBe('Bearer test-key')
+    } finally {
+      await dispose()
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it('carries configured headers through image upload and every Files API operation', async () => {
+    const server = await mockServer([{ kind: 'sse', events: textEvents }])
+    const { store } = attachmentStoreOf(() => Promise.resolve(requestImage()))
+    const adapter = adapterOf({ baseURL: server.url, requestHeaders }, store)
+    await drain(adapter.stream({
+      provider: 'deepseek-official', model: 'deepseek-v4-flash-vision-exp',
+      messages: [createUserMessage({ content: [{ type: 'image', attachment: imageRef }], source: { kind: 'plugin', plugin: 'test' } })],
+    }))
+    expect(server.fileRequests).toHaveLength(1)
+    const connection = resolveAdapterOptions({ baseURL: server.url, requestHeaders })
+    const client = new LlmDeepSeek.DeepSeekFilesClient({ ...connection, apiKey: 'k' })
+    const page = await client.list()
+    const fileId = page.data[0]!.id
+    await client.retrieve(fileId)
+    await client.delete(fileId)
+    expect(server.fileHeaders).toHaveLength(4)
+    for (const headers of [...server.fileHeaders, ...server.headers]) {
+      for (const [name, value] of Object.entries(requestHeaders)) expect(headers[name.toLowerCase()]).toBe(value)
+      expect(headers.authorization).toBe('Bearer k')
+      expect(headers['user-agent']).toBe(userAgent())
+    }
+    expect(server.fileHeaders[0]?.['content-type']).toMatch(/^multipart\/form-data; boundary=/)
+    for (const value of Object.values(requestHeaders)) expect(JSON.stringify(server.requests)).not.toContain(value)
+  })
+
+  it('preserves wire headers and bodies when requestHeaders is omitted or empty', async () => {
+    const server = await mockServer([{ kind: 'sse', events: textEvents }, { kind: 'sse', events: textEvents }])
+    for (const extra of [{}, { requestHeaders: {} }]) {
+      await drain(adapterOf({ baseURL: server.url, ...extra }).stream({ provider: 'deepseek-official', model: 'deepseek-v4-flash', messages: [] }))
+      const client = new LlmDeepSeek.DeepSeekFilesClient({ baseURL: server.url, apiKey: 'k', ...extra })
+      await client.list()
+    }
+    expect(server.headers[1]).toEqual(server.headers[0])
+    expect(server.requests[1]).toEqual(server.requests[0])
+    expect(server.fileHeaders[1]).toEqual(server.fileHeaders[0])
+  })
+
+  it('keeps harness authorization on the wire even when a direct adapter bypasses config validation', async () => {
+    const server = await mockServer([{ kind: 'sse', events: textEvents }])
+    const connection = { ...resolveAdapterOptions({ baseURL: server.url }), requestHeaders: { authorization: 'attempted-override' } }
+    const adapter = new DeepSeekAdapter({
+      options: () => connection,
+      resolveApiKey: () => Promise.resolve('real-key'),
+      resolveUserId: () => TEST_USER_ID,
+      prepareExtensions: noExtensions,
+    })
+    await drain(adapter.stream({ provider: 'deepseek-official', model: 'deepseek-v4-flash', messages: [] }))
+    await new LlmDeepSeek.DeepSeekFilesClient({ ...connection, apiKey: 'real-key' }).list()
+    expect(server.headers[0]?.authorization).toBe('Bearer real-key')
+    expect(server.fileHeaders[0]?.authorization).toBe('Bearer real-key')
+  })
+
+  const invalidHeaders: Array<[string, Record<string, string>, string]> = [
+    ...['authorization', 'content-type', 'content-length', 'accept', 'host', 'user-agent', 'transfer-encoding', 'connection', 'x-deepseek-harness-custom']
+      .flatMap(name => [name, name.toUpperCase()])
+      .map(name => [name, { [name]: 'private-test-marker' }, 'reserved'] as [string, Record<string, string>, string]),
+    ['', { '': 'private-test-marker' }, 'token'],
+    ['bad name', { 'bad name': 'private-test-marker' }, 'token'],
+    ['bad:name', { 'bad:name': 'private-test-marker' }, 'token'],
+    ['X-Empty', { 'X-Empty': '' }, 'non-empty'],
+    ['X-Large', { 'X-Large': 'a'.repeat(4097) }, '4096'],
+    ['X-Unicode', { 'X-Unicode': 'private-test-marker-中文' }, 'ASCII'],
+    ['X-CR', { 'X-CR': 'private-test-marker\rvalue' }, 'CR or LF'],
+    ['X-LF', { 'X-LF': 'private-test-marker\nvalue' }, 'CR or LF'],
+    ['X-Tab', { 'X-Tab': 'private-test-marker\tvalue' }, 'control'],
+    ['X-Control', { 'X-Control': 'private-test-marker\0value' }, 'control'],
+    ['X-32', Object.fromEntries(Array.from({ length: 33 }, (_, i) => [`X-${i}`, 'private-test-marker'])), '32'],
+  ]
+
+  it.each(invalidHeaders)('rejects %s before route registration without echoing values', async (name, headers, reason) => {
+    const ctx = new Context()
+    await ctx.plugin(LlmRuntime)
+    try {
+      expect(() => resolveAdapterOptions({ requestHeaders: headers })).toThrow(LlmError)
+      const fiber = ctx.plugin(LlmDeepSeek, { requestHeaders: headers })
+      await expect(fiber).rejects.toHaveProperty('code', 'INVALID_REQUEST_HEADER')
+      await expect(fiber).rejects.toThrow(JSON.stringify(name))
+      expect(() => resolveAdapterOptions({ requestHeaders: headers })).toThrow(reason)
+      expect(ctx.llm.listProviders()).toEqual([])
+      expect(ctx.llm.listConfigurableProviders()).toEqual([])
+      try { resolveAdapterOptions({ requestHeaders: headers }) } catch (caught) {
+        expect(String(caught)).not.toContain('private-test-marker')
+      }
+    } finally {
+      await ctx.fiber.dispose()
+    }
+  })
+
+  it.each([null, [], 'private-test-marker', { 'X-Type': 42 }, { 'X-Type': ['private-test-marker'] }])(
+    'rejects malformed config without disclosing values %#', async (requestHeaders) => {
+      const config = { requestHeaders } as unknown as LlmDeepSeek.Config
+      const ctx = new Context()
+      await ctx.plugin(LlmRuntime)
+      try {
+        expect(() => resolveAdapterOptions(config)).toThrow(LlmError)
+        await expect(ctx.plugin(LlmDeepSeek, config)).rejects.toMatchObject({ code: 'INVALID_REQUEST_HEADER' })
+        expect(ctx.llm.listProviders()).toEqual([])
+        try { resolveAdapterOptions(config) } catch (error) {
+          expect(String(error)).not.toContain('private-test-marker')
+        }
+      } finally {
+        await ctx.fiber.dispose()
+      }
+    },
+  )
+
+  it('accepts token punctuation and exact size limits and detaches the resolved headers', () => {
+    const headers = Object.fromEntries(Array.from({ length: 32 }, (_, i) => [`X-${i}`, 'a'.repeat(4096)]))
+    const resolved = resolveAdapterOptions({ requestHeaders: headers })
+    expect(resolved.requestHeaders).toEqual(headers)
+    headers['X-0'] = 'changed'
+    expect(resolved.requestHeaders?.['X-0']).toHaveLength(4096)
+    expect(resolveAdapterOptions({ requestHeaders: { "!#$%&'*+-.^_`|~09AZaz": 'ascii value' } }).requestHeaders)
+      .toEqual({ "!#$%&'*+-.^_`|~09AZaz": 'ascii value' })
+  })
+})
+
 describe('DeepSeekAdapter against a mock server', () => {
   it('merges prepared extension fields and accepts them once after HTTP 2xx', async () => {
     const server = await mockServer([{ kind: 'sse', events: textEvents }])
