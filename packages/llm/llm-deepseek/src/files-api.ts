@@ -70,6 +70,7 @@ export function isFilesQuotaError(error: unknown): error is DeepSeekFilesError {
 interface FilesApiOptions {
   baseURL: string
   apiKey: string
+  requestHeaders?: Record<string, string>
   fetch?: typeof fetch
 }
 
@@ -128,21 +129,23 @@ function providerErrorDetail(value: unknown): { message?: string; detail: string
 export class DeepSeekFilesClient {
   private readonly baseURL: string
   private readonly apiKey: string
+  private readonly requestHeaders: Record<string, string> | undefined
   private readonly fetchImpl: typeof fetch
 
   /**
-   * @param options - endpoint, API-key snapshot, and optional test transport.
+   * @param options - endpoint, API-key snapshot, validated static headers, and optional test transport.
    */
   constructor(options: FilesApiOptions) {
     this.baseURL = options.baseURL.replace(/\/+$/u, '')
     this.apiKey = options.apiKey
+    this.requestHeaders = options.requestHeaders
     this.fetchImpl = options.fetch ?? globalThis.fetch
   }
 
   private async request(path: string, init: RequestInit, signal?: AbortSignal): Promise<Response> {
     let response: Response
     try {
-      const headers = new Headers(attributionHeaders())
+      const headers = new Headers({ ...this.requestHeaders, ...attributionHeaders() })
       headers.set('authorization', `Bearer ${this.apiKey}`)
       response = await this.fetchImpl(`${this.baseURL}${path}`, {
         ...init,

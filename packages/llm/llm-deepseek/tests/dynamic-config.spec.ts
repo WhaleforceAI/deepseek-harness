@@ -290,6 +290,30 @@ describe('request-level dynamic configuration', () => {
     expect(good.headers[0]?.authorization).toBe('Bearer good-key')
   })
 
+  it('refreshes static headers and retains the last good snapshot with value-blind error logs', async () => {
+    vi.stubEnv('DEEPSEEK_API_KEY', 'test-key')
+    const server = await mockServer(Array.from({ length: 3 }, () => ({ kind: 'sse' as const, events: textEvents })))
+    const { ctx } = await boot(await home(), { baseURL: server.url, requestHeaders: { 'X-Trace': 'initial-trace' } })
+    const logs: string[] = []
+    const dispose = ctx.logger.exporter({ levels: { default: 3 }, export: (message) => {
+      logs.push(...message.args.map((arg: unknown) => arg instanceof Error ? arg.stack ?? arg.message : JSON.stringify(arg)))
+    } })
+    try {
+      await prompt(ctx)
+      await ctx.settings.update(NS, { requestHeaders: { 'X-Trace': 'updated-trace' } })
+      await prompt(ctx)
+      await ctx.settings.update(NS, { requestHeaders: { 'X-Trace': ['private-rejected-marker'] } })
+      await prompt(ctx)
+      expect(server.headers.map(headers => headers['x-trace'])).toEqual(['initial-trace', 'updated-trace', 'updated-trace'])
+      expect(logs.join('\n')).toContain('value must be a string')
+      for (const value of ['initial-trace', 'updated-trace', 'private-rejected-marker']) {
+        expect(logs.join('\n')).not.toContain(value)
+      }
+    } finally {
+      await dispose()
+    }
+  })
+
   it('falls back to the composition entry when settings detach', async () => {
     vi.stubEnv('DEEPSEEK_API_KEY', '')
     const dir = await home()
