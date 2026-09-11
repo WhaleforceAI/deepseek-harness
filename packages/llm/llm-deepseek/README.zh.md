@@ -89,9 +89,23 @@ harness LLM（大语言模型）seam 的 DeepSeek chat-completions 适配器：�
 
 ## 应用归因
 
-每个 chat 和 Files API 请求都携带 dsh-llm `attributionHeaders()` 的共享归因标头，即用于识别 harness 的必需 `User-Agent` 基线（见 [dsh-llm § 应用归因](../llm/README.zh.md#app-attribution-attributionts)）。在该适配器约定（adapter contract）下，直接 DeepSeek 请求与 OpenAI 兼容 gateway 请求都不会获得提供方特定应用归因标头；OpenRouter 应用归因暂缓到未来的显式 OpenRouter 适配器或模式。`GenerateOptions.purpose` 为 `compaction` 的请求（dsh-compaction-basic 的辅助摘要调用）还会携带 `x-deepseek-harness-compact: 1`，让宿主可以将压缩流量与会话请求分开。
+每个 chat 和 Files API 请求都携带 dsh-llm `attributionHeaders()` 的共享归因标头，即用于识别 harness 的必需 `User-Agent` 基线（见 [dsh-llm § 应用归因](../llm/README.zh.md#app-attribution-attributionts)）。默认情况下，适配器不会为直接 DeepSeek 请求或 OpenAI 兼容 gateway 请求添加提供方特定应用归因标头；OpenRouter 应用归因暂缓到未来的显式 OpenRouter 适配器或模式。`GenerateOptions.purpose` 为 `compaction` 的请求（dsh-compaction-basic 的辅助摘要调用）还会携带 `x-deepseek-harness-compact: 1`，让宿主可以将压缩流量与会话请求分开。
 
 DeepSeek 请求身份独立于应用归因。凭据解析成功后，每个提供方请求都会通过 `x-deepseek-harness-user-id` 携带来自 [`@deepseek-ai/dsh-anonymous-user-id`](../../identity/anonymous-user-id/README.zh.md) 的稳定匿名 id；携带 `GenerateOptions.sessionId` 的请求还会通过 `x-deepseek-harness-session-id` 发送该确切值，缺少会话的直接调用则省略会话标头。两个标头都会发送至解析后的 `baseURL`（包括已配置的 gateway），且不会进入请求正文或模型可见内容。
+
+## 静态请求标头
+
+`requestHeaders?: Record<string, string>` 将静态、非机密的可观测性元数据附加到解析后 `baseURL` 的每个 chat 和 Files API 请求，包括已配置的 gateway。例如，Agent Runtime 可以配置 `X-Opik-Trace-ID`、`X-Opik-Parent-Span-ID`、`X-Opik-Project-Name`、`X-Opik-Thread-ID`、`X-Opik-Tags` 和 `x-litellm-session-id`。省略该字段或传入 `{}` 不会增加标头。标头变更遵循与端点相同的 settings 快照规则。
+
+`resolveAdapterOptions` 在路由注册前校验并复制该记录；无效的初始配置抛出 `LlmError('INVALID_REQUEST_HEADER')`。无效的实时 settings 快照保留整份最近有效配置。诊断只指出标头名称和原因，不打印其值。
+
+- 最多 32 个条目；名称必须是非空的 RFC 7230 HTTP field-name token。
+- 不区分大小写的保留名称：`authorization`、`content-type`、`content-length`、`accept`、`host`、`user-agent`、`transfer-encoding`、`connection`，以及所有以 `x-deepseek-harness-` 开头的名称。
+- 值必须是非空 ASCII 字符串，最多 4096 字节，不得包含 CR/LF 或水平制表符以外的其他 HTTP 控制字符。
+
+自定义标头在 harness 自有标头之前展开，因此授权、内容协商、归因和请求身份保留优先权。Files 上传保留自动生成的 multipart 内容类型。该字段仅用于非机密元数据；凭据仍通过 `apiKeyEnv` 解析。
+
+这些值仅存在于 HTTP 标头中：适配器不会记录它们，也不会将其放入请求正文、遥测或会话事件。会话日志中的 `request/header` 事件记录模型请求选项，而非 HTTP 标头。静态标头不增加模型输入或 token，也不改变 harness 的提示词或 KV-cache 前缀。
 
 ## 协议格式说明
 

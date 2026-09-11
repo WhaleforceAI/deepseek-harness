@@ -22,6 +22,8 @@ export interface DeepSeekFilePolicy {
 export interface DeepSeekFileConnection {
   baseURL: string
   apiKey: string
+  /** Static observability headers already validated by configuration resolution. */
+  requestHeaders?: Record<string, string>
 }
 
 /** Result of one file-id resolution. */
@@ -127,6 +129,7 @@ export class DeepSeekFileStore {
     return new DeepSeekFilesClient({
       baseURL: connection.baseURL,
       apiKey: connection.apiKey,
+      ...connection.requestHeaders === undefined ? {} : { requestHeaders: connection.requestHeaders },
       ...this.fetchImpl === undefined ? {} : { fetch: this.fetchImpl },
     })
   }

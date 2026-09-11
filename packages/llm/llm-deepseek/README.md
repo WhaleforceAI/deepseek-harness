@@ -89,9 +89,23 @@ The plugin also declares its route in the configurable-provider directory (`ctx.
 
 ## App attribution
 
-Every chat and Files API request carries the shared attribution header from dsh-llm's `attributionHeaders()`, the mandatory `User-Agent` baseline identifying the harness (see [dsh-llm § App attribution](../llm/README.md#app-attribution-attributionts)). Direct DeepSeek requests and OpenAI-compatible gateway requests get no provider-specific app-attribution headers under this adapter contract; OpenRouter app attribution is deferred to a future explicit OpenRouter adapter or mode. A request whose `GenerateOptions.purpose` is `compaction` (dsh-compaction-basic's auxiliary summarization call) additionally carries `x-deepseek-harness-compact: 1`, so the host can separate compaction traffic from conversation requests.
+Every chat and Files API request carries the shared attribution header from dsh-llm's `attributionHeaders()`, the mandatory `User-Agent` baseline identifying the harness (see [dsh-llm § App attribution](../llm/README.md#app-attribution-attributionts)). The adapter adds no provider-specific app-attribution headers by default to direct DeepSeek or OpenAI-compatible gateway requests; OpenRouter app attribution is deferred to a future explicit OpenRouter adapter or mode. A request whose `GenerateOptions.purpose` is `compaction` (dsh-compaction-basic's auxiliary summarization call) additionally carries `x-deepseek-harness-compact: 1`, so the host can separate compaction traffic from conversation requests.
 
 DeepSeek request identity is separate from app attribution. After credential resolution, every provider request carries `x-deepseek-harness-user-id` with the stable anonymous id from [`@deepseek-ai/dsh-anonymous-user-id`](../../identity/anonymous-user-id/README.md); a request carrying `GenerateOptions.sessionId` also sends that exact value as `x-deepseek-harness-session-id`, while a direct call without a session omits the session header. Both headers go to the resolved `baseURL`, including a configured gateway, and remain outside the request body and model-visible content.
+
+## Static request headers
+
+`requestHeaders?: Record<string, string>` supplies static, non-secret observability metadata to every chat and Files API request at the resolved `baseURL`, including a configured gateway. For example, Agent Runtime can configure `X-Opik-Trace-ID`, `X-Opik-Parent-Span-ID`, `X-Opik-Project-Name`, `X-Opik-Thread-ID`, `X-Opik-Tags`, and `x-litellm-session-id`. Omission and `{}` add no headers. Header changes follow the same settings snapshot rules as the endpoint.
+
+`resolveAdapterOptions` validates and copies the record before route registration; invalid initial config throws `LlmError('INVALID_REQUEST_HEADER')`. An invalid live settings snapshot retains the whole last-good configuration. Diagnostics identify the header name and reason without printing its value.
+
+- At most 32 entries; names must be non-empty RFC 7230 HTTP field-name tokens.
+- Case-insensitive reserved names: `authorization`, `content-type`, `content-length`, `accept`, `host`, `user-agent`, `transfer-encoding`, `connection`, and every name beginning with `x-deepseek-harness-`.
+- Values must be non-empty ASCII strings of at most 4096 bytes, without CR/LF or other HTTP control characters except horizontal tab.
+
+Custom headers are spread before harness-owned headers, so authorization, content negotiation, attribution, and request identity retain precedence. Files uploads retain their generated multipart content type. Use this field only for non-secret metadata; credentials still resolve through `apiKeyEnv`.
+
+These values stay in HTTP headers: the adapter does not log them or put them in request bodies, telemetry, or session events. The session log's `request/header` event records model-request options, not HTTP headers. Static headers add no model input or tokens and do not change the harness's prompt or KV-cache prefix.
 
 ## Wire-format notes
 
