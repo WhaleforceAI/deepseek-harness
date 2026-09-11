@@ -50,7 +50,6 @@
     "@deepseek-ai/dsh-deepseek-llm-api-extensions": "workspace:^",
     "@deepseek-ai/dsh-plugin-package-inventory-deepseek": "workspace:^",
     "@deepseek-ai/dsh-session-log-deepseek": "workspace:^",
-    "@deepseek-ai/dsh-llm-pi-ai": "workspace:^",
     "@deepseek-ai/dsh-llm-retry": "workspace:^",
     "@deepseek-ai/dsh-mcp-client": "workspace:^",
     "@deepseek-ai/dsh-home-paths": "workspace:^",
