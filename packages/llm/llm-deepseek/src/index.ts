@@ -109,6 +109,13 @@ export interface Config {
   apiKeyEnv?: string
   /** Endpoint base; falls back to $DEEPSEEK_BASE_URL from a trusted environment layer, then the public API. */
   baseURL?: string
+  /**
+   * Static, non-secret observability headers sent to baseURL by chat and Files requests.
+   * Resolution rejects reserved or non-token names, more than 32 entries, and values
+   * that are empty, non-ASCII, exceed 4096 bytes, or contain CR/LF or other HTTP
+   * control characters except horizontal tab.
+   */
+  requestHeaders?: Record<string, string>
   /** Request dialect; `openai-compatible` omits DeepSeek reasoning controls and publishes no reasoning efforts. */
   wireDialect?: 'deepseek' | 'openai-compatible'
   /** DeepSeek-dialect thinking policy; `disabled` limits every conversation request to `off`. */
@@ -162,6 +169,8 @@ const catalogModel: z<DeepSeekCatalogModel> = z.object({
 export const Config: z<Config> = z.object({
   apiKeyEnv: z.string().role('credential-ref').default(DEFAULT_API_KEY_ENV),
   baseURL: z.string(),
+  // Schemastery type errors echo rejected values; resolution owns value-blind diagnostics.
+  requestHeaders: z.any<Record<string, string>>(),
   wireDialect: z.union(['deepseek', 'openai-compatible']).default('deepseek'),
   thinking: z.union(['enabled', 'disabled']),
   reasoningEffort: z.union(['off', 'low', 'high', 'max']),
@@ -195,6 +204,34 @@ const BASE_URL_ENV = 'DEEPSEEK_BASE_URL'
  * newer key.
  */
 export type ResolvedDeepSeekOptions = DeepSeekConnectionOptions
+
+/** Validate and detach transport metadata before provider registration. */
+function resolveRequestHeaders(headers: unknown): Record<string, string> | undefined {
+  if (headers === undefined) return undefined
+  if (headers === null || typeof headers !== 'object' || Array.isArray(headers)) {
+    throw new LlmError('llm-deepseek: requestHeaders must be a header-name to string-value record', 'INVALID_REQUEST_HEADER')
+  }
+  const entries = Object.entries(headers) as Array<[string, unknown]>
+  for (const [index, [name, value]] of entries.entries()) {
+    let reason: string | undefined
+    const lower = name.toLowerCase()
+    if (index >= 32) reason = 'at most 32 header entries are allowed'
+    else if (!/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/u.test(name)) reason = 'name must be an HTTP field-name token'
+    else if (['authorization', 'content-type', 'content-length', 'accept', 'host', 'user-agent',
+      'transfer-encoding', 'connection'].includes(lower) || lower.startsWith('x-deepseek-harness-')) {
+      reason = 'name is reserved for the harness'
+    } else if (typeof value !== 'string') reason = 'value must be a string'
+    else if (value.length === 0) reason = 'value must be non-empty'
+    else if (/[^\x00-\x7f]/u.test(value)) reason = 'value must be ASCII'
+    else if (/[\r\n]/u.test(value)) reason = 'value must not contain CR or LF'
+    else if (/[^\t\x20-\x7e]/u.test(value)) reason = 'value must not contain HTTP control characters'
+    else if (value.length > 4096) reason = 'value must not exceed 4096 bytes'
+    if (reason !== undefined) {
+      throw new LlmError(`llm-deepseek: requestHeaders ${JSON.stringify(name)}: ${reason}`, 'INVALID_REQUEST_HEADER')
+    }
+  }
+  return Object.fromEntries(entries) as Record<string, string>
+}
 
 /** Resolve, validate, and detach the advisory model catalog. */
 function resolveModels(models: readonly DeepSeekCatalogModel[] | undefined): DeepSeekCatalogModel[] {
@@ -277,6 +314,7 @@ function resolveModels(models: readonly DeepSeekCatalogModel[] | undefined): Dee
  * @returns validated connection facts plus the credential reference.
  */
 export function resolveAdapterOptions(config: Config, environment?: LaunchEnvironmentSnapshot): ResolvedDeepSeekOptions {
+  const requestHeaders = resolveRequestHeaders(config.requestHeaders)
   const wireDialect = config.wireDialect ?? 'deepseek'
   if (wireDialect === 'openai-compatible'
     && (config.thinking !== undefined || config.reasoningEffort !== undefined)) {
@@ -368,6 +406,7 @@ export function resolveAdapterOptions(config: Config, environment?: LaunchEnviro
     baseURL: config.baseURL
       ?? environment?.get(BASE_URL_ENV)?.value
       ?? PUBLIC_BASE_URL,
+    ...requestHeaders === undefined ? {} : { requestHeaders },
     defaults: {
       wireDialect,
       thinking: config.thinking,

@@ -15,6 +15,8 @@ export interface MockServer {
   headers: IncomingMessage['headers'][]
   /** Parsed Files API operations, excluded from chat request ordering. */
   fileRequests: Array<{ method: string; path: string; filename?: string; bytes?: number }>
+  /** Header bags for Files API operations, in arrival order. */
+  fileHeaders: IncomingMessage['headers'][]
   script: Behavior[]
   close(): Promise<void>
 }
@@ -39,6 +41,7 @@ export async function mockServer(script: Behavior[]): Promise<MockServer> {
   const requests: unknown[] = []
   const headers: IncomingMessage['headers'][] = []
   const fileRequests: MockServer['fileRequests'] = []
+  const fileHeaders: IncomingMessage['headers'][] = []
   const files = new Map<string, { id: string; object: 'file'; bytes: number; created_at: number; filename: string; purpose: 'user_data'; expires_at: number }>()
   let nextFile = 1
   const server = createServer((request: IncomingMessage, response: ServerResponse) => {
@@ -48,6 +51,7 @@ export async function mockServer(script: Behavior[]): Promise<MockServer> {
       void (async () => {
         const url = new URL(request.url ?? '/', 'http://localhost')
         const body = Buffer.concat(chunks)
+        if (url.pathname === '/files' || url.pathname.startsWith('/files/')) fileHeaders.push(request.headers)
         if (url.pathname === '/files' && request.method === 'POST') {
           const headers = new Headers()
           for (const [name, value] of Object.entries(request.headers)) {
@@ -154,6 +158,7 @@ export async function mockServer(script: Behavior[]): Promise<MockServer> {
     requests,
     headers,
     fileRequests,
+    fileHeaders,
     script,
     close: () => new Promise(resolve => server.close(() => { resolve() })),
   }

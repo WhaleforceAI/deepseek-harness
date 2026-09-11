@@ -77,6 +77,8 @@ export interface DeepSeekConnectionOptions {
    * only this name — a literal key is not a configuration value.
    */
   apiKeyEnv: CredentialRef
+  /** Validated static observability headers; values stay outside model input and logs. */
+  requestHeaders?: Record<string, string>
   /** Resolved request dialect and optional DeepSeek thinking defaults applied to every call. */
   defaults: ResolvedRequestDefaults
   /** Default per-request output cap; explicit request values win. */
@@ -520,6 +522,7 @@ export class DeepSeekAdapter extends LlmAdapter {
     onActivity: () => void,
   ): AsyncIterable<StreamChunk> {
     const headers = {
+      ...connection.requestHeaders,
       'authorization': `Bearer ${apiKey}`,
       'content-type': 'application/json',
       'accept': 'text/event-stream',
@@ -533,7 +536,11 @@ export class DeepSeekAdapter extends LlmAdapter {
         : {},
     }
 
-    const fileConnection = { baseURL: connection.baseURL, apiKey }
+    const fileConnection = {
+      baseURL: connection.baseURL,
+      apiKey,
+      ...connection.requestHeaders === undefined ? {} : { requestHeaders: connection.requestHeaders },
+    }
     const model = connection.models.find(entry => entry.id === options.model)
     const policy = model === undefined ? undefined : resolveRequestImagePolicy(model)
     const requestMessages = policy === undefined ? options.messages : offloadRequestImagesWithPolicy(options.messages, {

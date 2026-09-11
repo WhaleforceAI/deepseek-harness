@@ -34,9 +34,11 @@ describe('DeepSeekFilesClient', () => {
       const headers = new Headers(init?.headers)
       expect(headers.get('authorization')).toBe('Bearer key')
       expect(headers.get('user-agent')).toBe(userAgent())
+      expect(headers.get('x-opik-trace-id')).toBe('files-trace-marker')
       const form = init?.body
       expect(form).toBeInstanceOf(FormData)
       if (!(form instanceof FormData)) throw new Error('expected multipart body')
+      expect([...form.values()]).not.toContain('files-trace-marker')
       expect(form.get('purpose')).toBe('user_data')
       expect(form.get('expires_after[anchor]')).toBe('created_at')
       expect(form.get('expires_after[seconds]')).toBe('604800')
@@ -45,7 +47,7 @@ describe('DeepSeekFilesClient', () => {
       expect((blob as Blob).size).toBe(3)
       return new Response(JSON.stringify(file()), { status: 200 })
     }) as typeof fetch
-    const client = new DeepSeekFilesClient({ baseURL: 'https://api.deepseek.com/', apiKey: 'key', fetch: fetchImpl })
+    const client = new DeepSeekFilesClient({ baseURL: 'https://api.deepseek.com/', apiKey: 'key', requestHeaders: { 'X-Opik-Trace-ID': 'files-trace-marker' }, fetch: fetchImpl })
 
     await expect(client.upload({
       data: Uint8Array.of(1, 2, 3),

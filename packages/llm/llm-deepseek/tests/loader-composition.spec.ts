@@ -42,7 +42,7 @@ afterEach(async () => {
 })
 
 async function loadComposition(
-  options: { withDynamic: boolean; baseURL: string; reuseRoot?: string },
+  options: { withDynamic: boolean; baseURL: string; requestHeaders?: Record<string, string>; reuseRoot?: string },
 ): Promise<{ ctx: Context; settingsPath: string; credentialsPath: string }> {
   // A reused root is the restart case: the same harness home, its documents
   // exactly as the previous process left them.
@@ -78,6 +78,7 @@ async function loadComposition(
     "  name: '@deepseek-ai/dsh-llm-deepseek'",
     '  config:',
     `    baseURL: ${JSON.stringify(options.baseURL)}`,
+    `    requestHeaders: ${JSON.stringify(options.requestHeaders ?? {})}`,
     '',
   ].join('\n'))
 
@@ -168,11 +169,12 @@ describe('llm-deepseek real dynamic composition', () => {
     // reference, so the environment is the whole credential plane here.
     vi.stubEnv('DEEPSEEK_API_KEY', 'entry-key')
     const server = await mockServer([{ kind: 'sse', events: textEvents }])
-    const { ctx } = await loadComposition({ withDynamic: false, baseURL: server.url })
+    const { ctx } = await loadComposition({ withDynamic: false, baseURL: server.url, requestHeaders: { 'X-Opik-Trace-ID': 'loader-trace' } })
 
     expect(ctx.get('settings')).toBeUndefined()
     expect(ctx.get('credentials')).toBeUndefined()
     await assemble(ctx, { model: 'deepseek-v4-flash', messages: [] })
     expect(server.headers[0]?.authorization).toBe('Bearer entry-key')
+    expect(server.headers[0]?.['x-opik-trace-id']).toBe('loader-trace')
   })
 })
