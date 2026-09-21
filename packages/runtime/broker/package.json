@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-runtime-broker",
   "description": "Run-local native capability bridge for Agent Runtime",
-  "version": "0.1.1-rc.2",
+  "version": "0.1.2-rc.1",
   "private": true,
   "type": "module",
   "main": "lib/index.js",
