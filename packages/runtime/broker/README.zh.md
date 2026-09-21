@@ -7,18 +7,18 @@ kind: "package-reference"
 
 [English](README.md) | 中文
 
-## Summary
+## 概述
 
 使用 Runtime broker 将原生工具、文件系统访问和子进程路由到同一个经过认证的运行租约。配额拒绝会停止运行并阻止后续普通请求。只有部署显式确认工作区由该运行独占时，才能启用发现结果复用。
 
-## Table of Contents
+## 目录
 
 - [使用此包](#use-this-package)
 - [理解实现](#understand-the-implementation)
 - [进一步探索](#further-exploration)
 - [模型体验](#model-experience)
 - [已知限制与延后工作](#known-limitations-and-deferred-work)
-- [开发笔记](#dev-note)
+- [开发备注](#dev-note)
 
 -----
 
@@ -91,7 +91,7 @@ kind: "package-reference"
 - **复用在第一条命令时结束。** broker 会话完成不能证明脱离的后代进程已经停止。重新启用复用需要 broker 提供整个进程树已静止的证明。
 
 <a id="dev-note"></a>
-### 开发笔记
+### 开发备注
 
 <details>
 <summary>维护者工作上下文 — 点击展开</summary>
