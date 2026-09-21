@@ -27,7 +27,7 @@ interface DemoPolicy {
 const MANIFEST_BIN_ALLOWLIST = new Map<string, ManifestBin>([
   ['apps/cli/package.json', { dsh: 'lib/bin.js' }],
   ['packages/experimental/webworker-packer/package.json', { 'dsh-pack-vfs-image': './bin.js' }],
-  ['packages/runtime/launcher/package.json', { 'dsh-jsonrpc-agent': 'lib/index.js' }],
+  ['packages/runtime/launcher/package.json', { 'dsh-jsonrpc-agent': 'lib/startup.js' }],
 ])
 
 /** Every executable in a Node application workspace has one explicit role. */

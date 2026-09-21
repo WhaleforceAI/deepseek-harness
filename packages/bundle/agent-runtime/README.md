@@ -11,6 +11,16 @@ This bundle layers after [`dsh-base`](../base/README.md) and [`dsh-sdk-app`](../
 
 It disables local sandbox providers, interactive tools, direct Web access, telemetry, and local spill storage. Skill discovery reads only `/workspace/.skills`, where the Runtime uploads the run's skill bundle, and filesystem search calls the sandbox's `rg` executable.
 
+## Table of Contents
+
+- [Use this package](#use-this-package)
+- [Model Experience](#model-experience)
+- [Known Limitations and Deferred Work](#known-limitations-and-deferred-work)
+- [Dev Note](#dev-note)
+
+-----
+
+<a id="use-this-package"></a>
 ## Use this package
 
 Compose profile bundles in this order:
@@ -27,6 +37,7 @@ The bundle deliberately omits broker `socketPath` and `secret` values. Supply bo
 
 Set `DSH_TELEMETRY_DISABLED=1` in the Harness environment as the process-level telemetry opt-out in addition to this layer's disabled telemetry row.
 
+<a id="model-experience"></a>
 ## Model Experience
 
 ### What the model sees
@@ -43,6 +54,18 @@ The bundle is static for a profile process. Per-run model, prompt, and native br
 
 ## Known Limitations and Deferred Work
 
+<a id="known-limitations-and-deferred-work"></a>
+
 Local spill files stay disabled because their Harness-container paths cannot be read through the brokered filesystem. Add a broker-backed spill provider before enabling spill policy.
+
+<a id="dev-note"></a>
+### Dev Note
+
+<details>
+<summary>Working context for maintainers — click to expand</summary>
+
+None.
+
+</details>
 
 **Runtime invariant:** No companion is published. The bundle owns static composition only; its focused composition test verifies every override resolves and that host-only providers remain disabled.
