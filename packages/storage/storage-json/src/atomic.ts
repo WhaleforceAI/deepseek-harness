@@ -1,7 +1,7 @@
 /**
  * Atomic whole-file replacement for the JSON backend.
  *
- * Publish protocol: write a same-directory temp file, fsync it, then
+ * Publish protocol: write a same-directory `.record-<target hash>.<UUID>.tmp`, fsync it, then
  * `rename()` over the target. Rename is an atomic replace on POSIX and on
  * Windows (libuv maps it to `MoveFileExW(..., MOVEFILE_REPLACE_EXISTING)`),
  * and replacement is the intended semantic here — unlike the session-log
@@ -12,8 +12,8 @@
  */
 
 import { open, rename, rm } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
-import { randomUUID } from 'node:crypto'
+import { basename, dirname, join } from 'node:path'
+import { createHash, randomUUID } from 'node:crypto'
 
 /**
  * Durably replace `path` with `data`.
@@ -22,7 +22,10 @@ import { randomUUID } from 'node:crypto'
  * @returns resolution after the replacement is crash-durable.
  */
 export async function writeAtomic(path: string, data: string): Promise<void> {
-  const tmp = join(dirname(path), `.${randomUUID()}.tmp`)
+  // A fixed-length target identity lets retention attribute interrupted writes
+  // without exceeding the filesystem's filename limit for long record keys.
+  const target = createHash('sha256').update(basename(path), 'utf8').digest('hex')
+  const tmp = join(dirname(path), `.record-${target}.${randomUUID()}.tmp`)
   try {
     const handle = await open(tmp, 'wx', 0o600)
     try {
