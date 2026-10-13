@@ -32,7 +32,10 @@ env:
 
 jobs:
   preview:
-    runs-on: dsh-ubuntu-24-04-16core
+    # Upstream-only: publishes to the upstream Cloudflare Pages project and needs
+    # its CLOUDFLARE_* / CF_ACCESS_* secrets, which this fork does not hold.
+    if: ${{ github.repository == 'deepseek-harness/deepseek-harness' }}
+    runs-on: ubuntu-24.04
     name: cloudflare pages preview
     steps:
       - uses: actions/checkout@v6
