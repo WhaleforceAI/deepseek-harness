@@ -36,8 +36,7 @@ jobs:
   # serial-linux-selfhosted standby lane in ci-master.yml. The Windows failover
   # switch is the separate DSH_CI_FAILOVER_WINDOWS variable on the windows-native
   # job below.
-  # UPSTREAM-ONLY SUITES: every `node 24 /` and `windows node 24 /` job below (and the
-  # all-checks-passed aggregate over them) is gated to the upstream repo. These suites
+  # UPSTREAM-ONLY SUITES: every `node 24 /` and `windows node 24 /` job below is gated to the upstream repo. These suites
   # never ran on this fork (their dsh-*-16core runners do not exist here) and fail
   # fork-owned code against upstream gates (MIT license, duplication, Windows worker).
   # Linux node 24 on the fork is a follow-up; Windows stays upstream-only.
@@ -673,10 +672,11 @@ jobs:
           && fromJSON('["self-hosted", "linux", "x64", "vm-backup"]')
           || 'ubuntu-latest' }}
     needs: [node-24, node-24-coverage, node-24-consumers, node-compat, python-sdk, python-runtime, windows, windows-build, windows-native-tests]
-    if: always() && github.event_name == 'pull_request' && github.repository == 'deepseek-harness/deepseek-harness'
+    if: always() && github.event_name == 'pull_request'
     steps:
       - name: Fail if any needed job did not succeed
-        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')
+        # On the fork the gated upstream-only suites are skipped by design; skipped only fails upstream.
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || (github.repository == 'deepseek-harness/deepseek-harness' && contains(needs.*.result, 'skipped'))
         run: |
           echo "::error::Needed job results: ${{ join(needs.*.result, ', ') }}"
           exit 1
