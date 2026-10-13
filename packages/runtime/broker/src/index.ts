@@ -62,7 +62,6 @@ const MAX_HINT_CHARS = 500
 /** Runtime-written guidance from the bridge's optional error message, bounded and single-line. */
 function bridgeHint(value: unknown): string | undefined {
   if (typeof value !== 'string') return undefined
-  // eslint-disable-next-line no-control-regex
   const text = value.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim()
   return text ? text.slice(0, MAX_HINT_CHARS) : undefined
 }
