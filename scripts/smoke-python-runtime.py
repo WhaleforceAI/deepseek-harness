@@ -728,7 +728,17 @@ def main() -> None:
         help="require a clean virtual environment containing matching installed SDK and runtime wheels",
     )
     parser.add_argument("--update-snapshots", action="store_true")
+    parser.add_argument(
+        "--skip-scenario",
+        action="append",
+        default=[],
+        help="leave this scenario out of --scenario all (repeatable)",
+    )
     args = parser.parse_args()
+
+    def selected(name: str) -> bool:
+        return args.scenario == name or (args.scenario == "all" and name not in args.skip_scenario)
+
     if args.installed_wheel and args.exe is not None:
         parser.error("--installed-wheel resolves the wheel's own runtime and cannot be combined with --exe")
     if args.scenario == "sdk-live" and not args.installed_wheel:
@@ -750,30 +760,30 @@ def main() -> None:
         return
 
     with MockModel() as model:
-        if args.scenario in {"all", "sdk-default"}:
+        if selected("sdk-default"):
             smoke_sdk_default(model.url)
-        if args.scenario in {"all", "sdk-resume"}:
+        if selected("sdk-resume"):
             smoke_sdk_resume(model.url, args.update_snapshots)
-        if args.scenario in {"all", "sdk-custom"}:
+        if selected("sdk-custom"):
             assert args.exe is not None
             smoke_sdk_custom(model.url, args.exe.resolve())
-        if args.scenario in {"all", "sdk-minimal"}:
+        if selected("sdk-minimal"):
             assert args.exe is not None
             smoke_sdk_minimal(model.url, args.exe.resolve(), args.update_snapshots)
-        if args.scenario in {"all", "sdk-fs-search"}:
+        if selected("sdk-fs-search"):
             assert args.exe is not None
             smoke_sdk_fs_search(model.url, args.exe.resolve())
-        if args.scenario in {"all", "sdk-mcp"}:
+        if selected("sdk-mcp"):
             smoke_sdk_mcp(model.url, None if args.exe is None else args.exe.resolve())
-        if args.scenario in {"all", "sdk-snapshot"}:
+        if selected("sdk-snapshot"):
             assert args.exe is not None
             smoke_sdk_snapshot(model.url, args.exe.resolve(), args.update_snapshots)
-        if args.scenario in {"all", "sdk-restart"}:
+        if selected("sdk-restart"):
             assert args.exe is not None
             smoke_sdk_restart_snapshot(model.url, args.exe.resolve(), args.update_snapshots)
-        if args.installed_wheel and args.scenario in {"all", "sdk-profile-plugin"}:
+        if args.installed_wheel and selected("sdk-profile-plugin"):
             smoke_sdk_profile_plugin(model.url)
-        if args.scenario in {"all", "direct"}:
+        if selected("direct"):
             assert args.exe is not None
             smoke_direct(model.url, args.exe.resolve())
         if not MockModelHandler.requests:
