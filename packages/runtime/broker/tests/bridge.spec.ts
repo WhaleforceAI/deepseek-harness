@@ -44,6 +44,18 @@ async function harness(reply: (request: Request) => unknown) {
 }
 
 describe('run-owned bridge', () => {
+  it('puts the runtime hint into the error message the model reads, bounded', async () => {
+    const hint = 'The peer rejected the parameters. Send again without context_id.'
+    const { bridge } = await harness(() => ({ ok: false, error: { code: 'a2a_peer_invalid_params', status: 400, message: hint } }))
+    const error = await bridge.invoke('a2a_send_message', {}).catch((error: unknown) => error)
+    expect(error).toBeInstanceOf(RuntimeBroker.BrokerInvokeError)
+    expect(error).toMatchObject({ code: 'a2a_peer_invalid_params', status: 400, message: 'runtime-broker: a2a_peer_invalid_params: ' + hint })
+
+    const long = await harness(() => ({ ok: false, error: { code: 'x_error', status: 400, message: 'a\nb'.repeat(1000) } }))
+    const bounded = await long.bridge.invoke('t', {}).catch((error: unknown) => error) as Error
+    expect(bounded.message).toBe('runtime-broker: x_error: ' + 'a ba ba b'.repeat(100).slice(0, 500))
+  })
+
   it('retains the typed first quota denial and blocks every subsequent operation before transport', async () => {
     const { bridge, calls, config } = await harness(() => ({ ok: false, error: { code: 'run_quota_exceeded', status: 403 } }))
     const onTerminal = vi.fn()
