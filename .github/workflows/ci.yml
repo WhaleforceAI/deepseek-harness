@@ -680,5 +680,10 @@ jobs:
         run: |
           echo "::error::Needed job results: ${{ join(needs.*.result, ', ') }}"
           exit 1
+      - name: Fail if a job that must run on the fork was skipped
+        if: needs.node-compat.result == 'skipped' || needs.python-sdk.result == 'skipped' || needs.python-runtime.result == 'skipped'
+        run: |
+          echo "::error::A fork-required job was skipped: node-compat=${{ needs.node-compat.result }} python-sdk=${{ needs.python-sdk.result }} python-runtime=${{ needs.python-runtime.result }}"
+          exit 1
       - name: All checks passed
         run: echo "All needed jobs succeeded (${{ join(needs.*.result, ', ') }})"
