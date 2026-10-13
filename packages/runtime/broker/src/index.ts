@@ -51,10 +51,19 @@ export const Config: z<Config> = z.object({
 
 /** A validated broker rejection, including the original HTTP status. */
 export class BrokerInvokeError extends Error {
-  constructor(readonly code: string, readonly status: number) {
-    super('runtime-broker: ' + code)
+  constructor(readonly code: string, readonly status: number, hint?: string) {
+    super('runtime-broker: ' + code + (hint ? ': ' + hint : ''))
     this.name = 'BrokerInvokeError'
   }
+}
+
+const MAX_HINT_CHARS = 500
+
+/** Runtime-written guidance from the bridge's optional error message, bounded and single-line. */
+function bridgeHint(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined
+  const text = value.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim()
+  return text ? text.slice(0, MAX_HINT_CHARS) : undefined
 }
 
 declare module '@deepseek-ai/cordis' {
@@ -212,7 +221,7 @@ export class BrokerBridge {
           || failure.status < 100 || failure.status > 599) {
           finish(new Error('runtime-broker: bridge response invalid')); return
         }
-        const error = new BrokerInvokeError(failure.code, failure.status)
+        const error = new BrokerInvokeError(failure.code, failure.status, bridgeHint(failure.message))
         if (error.code === 'run_quota_exceeded' && !this.terminal) {
           this.terminal = error
           this.invalidate()
