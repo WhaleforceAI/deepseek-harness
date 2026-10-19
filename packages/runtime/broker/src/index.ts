@@ -324,6 +324,11 @@ export const name = 'runtime-broker'
 export const inject = ['tools', 'agents']
 
 export function apply(ctx: Context, config: Config): void {
+  // Agent Runtime accepts yield_time_ms from 250 ms; 0 leaves polls unchanged.
+  const floor = config.stdinPollYieldMs ?? 0
+  if (!Number.isSafeInteger(floor) || floor < 0 || floor > 110_000 || (floor > 0 && floor < 250)) {
+    throw new Error('runtime-broker: stdinPollYieldMs must be 0 or an integer from 250 through 110000')
+  }
   const bridge = new BrokerBridge(config)
   ctx.provide('runtimeBroker', bridge)
   ctx.effect(() => () => { bridge.dispose() })

@@ -339,6 +339,13 @@ describe('run-owned bridge', () => {
     ])
   })
 
+  it('rejects a poll floor Agent Runtime would refuse', () => {
+    for (const stdinPollYieldMs of [1, 249, 110_001, 1.5]) {
+      expect(() => RuntimeBroker.apply({} as never, { stdinPollYieldMs } as never))
+        .toThrow('stdinPollYieldMs must be 0 or an integer from 250 through 110000')
+    }
+  })
+
   it('aborts already-dispatched siblings with the original quota error', async () => {
     const received = Promise.withResolvers<undefined>()
     const pending = Promise.withResolvers<unknown>()
