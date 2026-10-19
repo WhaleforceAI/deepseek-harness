@@ -265,8 +265,8 @@ describe('discovery metadata cache', () => {
     expect(invoke.mock.calls.map(([tool]) => tool)).toEqual(['stat_file', 'list_files', 'stat_file', 'stat_file'])
   })
 
-  it.each([[], [{ name: 'AGENTS.md', type: 'symlink', mtime_ms: 1 }]])(
-    'evicts cached workspace rejection on command revalidation with entries %j', async (entries) => {
+  it.each([{ entries: [] }, { entries: [{ name: 'AGENTS.md', type: 'symlink', mtime_ms: 1 }] }])(
+    'evicts cached workspace rejection on command revalidation with entries $entries', async ({ entries }) => {
       const denial = new BrokerInvokeError('file_path_outside_workspace', 422)
       const invoke = vi.fn<FakeBridge['invoke']>()
         .mockRejectedValueOnce(denial)
