@@ -77,12 +77,22 @@ function record(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value)
 }
 
+type CommandSessionId = string | number
+
+function commandSessionId(value: unknown): value is CommandSessionId {
+  return (typeof value === 'string' && value.length > 0 && value !== '__all__')
+    || (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0)
+}
+
 /** Shared owner for a single Runtime bridge lease; never reuse across runs. */
 export class BrokerBridge {
   private revision = 0
   private pendingMutations = 0
-  // ponytail: command exit does not prove descendant exit; resume reuse only with broker whole-tree quiescence proof.
-  private commandDispatched = false
+  private discoveryRevision = 0
+  private commands = 0
+  private readonly liveCommands = new Map<CommandSessionId, number>()
+  private readonly completedCommands = new Map<CommandSessionId, number>()
+  private unknownCommand = false
   private readonly lifetime = new AbortController()
   private terminal: BrokerInvokeError | undefined
   private readonly terminalListeners = new Set<(error: BrokerInvokeError) => void>()
@@ -96,16 +106,20 @@ export class BrokerBridge {
 
   /** Current filesystem mutation generation. */
   get generation(): number { return this.revision }
-  /** Whether discovery observations can be reused or stored. */
+  /** Generation of non-command invalidations; command epochs require separate revalidation. */
+  get discoveryGeneration(): number { return this.discoveryRevision }
+  /** Number of command and stdin dispatches, including failed requests. */
+  get commandEpoch(): number { return this.commands }
+  /** Whether discovery checks and storage are permitted with no pending or live commands; reuse requires epoch revalidation. */
   get cacheAllowed(): boolean {
-    return this.config.cacheDiscovery === true && !this.terminal && !this.lifetime.signal.aborted && !this.pendingMutations
-      && !this.commandDispatched
+    return this.config.cacheDiscovery === true && !this.terminal && !this.lifetime.signal.aborted
+      && !this.pendingMutations && !this.liveCommands.size && !this.unknownCommand
   }
   /** The first quota denial, retained until disposal. */
   get terminalError(): BrokerInvokeError | undefined { return this.terminal }
 
   /** Advance the observation generation, including listing contradictions. */
-  invalidate(): void { this.revision++ }
+  invalidate(): void { this.revision++; this.discoveryRevision++ }
 
   /** Reject terminal, disposed, or aborted work before using cached data or opening a socket.
    * @param signal - optional caller cancellation.
@@ -152,10 +166,16 @@ export class BrokerBridge {
     this.assertAvailable(signal)
     const command = tool === 'exec_command' || tool === 'write_stdin'
     const mutation = command || tool === 'write_file'
-    if (command) this.commandDispatched = true
-    if (mutation) { this.pendingMutations++; this.invalidate() }
+    if (command) this.commands++
+    const commandEpoch = this.commands
+    if (mutation) {
+      this.pendingMutations++
+      if (command) this.revision++
+      else this.invalidate()
+    }
     try {
       const result = await this.exchange(tool, args, signal)
+      if (command) this.observeCommand(tool, args, result, commandEpoch)
       if (tool === 'list_files' && record(args) && typeof args.path === 'string') {
         for (const listener of this.listingListeners) {
           try { listener(args.path, result) }
@@ -164,10 +184,47 @@ export class BrokerBridge {
       }
       return result
     } catch (error) {
+      if (command) this.observeCommand(tool, args, undefined, commandEpoch)
       throw this.terminal ?? error
     } finally {
-      if (mutation) { this.pendingMutations--; this.invalidate() }
+      if (mutation) {
+        this.pendingMutations--
+        if (command) this.revision++
+        else this.invalidate()
+      }
     }
+  }
+
+  private observeCommand(tool: string, args: unknown, result: unknown, epoch: number): void {
+    const addressed = tool === 'write_stdin' && record(args) && commandSessionId(args.session_id)
+      ? args.session_id : undefined
+    const retain = (session: CommandSessionId): void => {
+      // A completion also fences older responses still in flight for this session.
+      if ((this.completedCommands.get(session) ?? -1) < epoch) {
+        this.liveCommands.set(session, Math.max(this.liveCommands.get(session) ?? -1, epoch))
+      }
+    }
+    if (record(result) && commandSessionId(result.session_id)) {
+      retain(result.session_id)
+      if (tool === 'write_stdin' && addressed !== result.session_id) {
+        if (addressed !== undefined) retain(addressed)
+        this.unknownCommand = true
+      }
+      return
+    }
+    const complete = record(result) && !Object.hasOwn(result, 'session_id')
+      && ((typeof result.exit_code === 'number' && Number.isInteger(result.exit_code)
+        && result.exit_code >= 0 && result.exit_code <= 255)
+        || (typeof result.signal === 'string' && /^SIG[A-Z0-9]+$/.test(result.signal)))
+    if (complete && (tool === 'exec_command' || addressed !== undefined)) {
+      if (addressed !== undefined) {
+        if ((this.liveCommands.get(addressed) ?? -1) <= epoch) this.liveCommands.delete(addressed)
+        this.completedCommands.set(addressed, Math.max(this.completedCommands.get(addressed) ?? -1, epoch))
+      }
+      return
+    }
+    if (addressed !== undefined) retain(addressed)
+    else this.unknownCommand = true
   }
 
   private exchange(tool: string, args: unknown, signal?: AbortSignal): Promise<unknown> {
