@@ -46,6 +46,72 @@ function spawnSpec(overrides: Partial<SubprocessSpawnSpec> = {}): SubprocessSpaw
 }
 
 describe('BrokerSubprocessRuntime', () => {
+  it('polls a 60 s command a few times with the default poll wait', async () => {
+    // A virtual broker clock: each call waits its yield_time_ms (250 ms broker
+    // default for write_stdin) or returns early when the command exits at 60 s.
+    const sixtySecondCommand = (): FakeBridge => {
+      let clock = 0
+      return new FakeBridge(({ tool, args }) => {
+        clock = Math.min(60_000, clock + (typeof args.yield_time_ms === 'number' ? args.yield_time_ms : 250))
+        if (tool === 'exec_command' || clock < 60_000) return { output: '', exit_code: null, session_id: 'build' }
+        return { output: 'done', exit_code: 0 }
+      })
+    }
+    const polls = async (pollYieldMs?: number): Promise<number> => {
+      const bridge = sixtySecondCommand()
+      const config = { pollMs: 1, ...(pollYieldMs === undefined ? {} : { pollYieldMs }) }
+      const provider = new BrokerSubprocessRuntime(new Context(), config, bridge)
+      await expect(provider.spawn(spawnSpec()).done).resolves.toMatchObject({ exitCode: 0 })
+      return bridge.calls.filter(call => call.tool === 'write_stdin').length
+    }
+
+    expect(await polls(0)).toBe(239)
+    expect(await polls()).toBe(20)
+  })
+
+  it('keeps polls short while stdin is open so a write is not queued behind a long poll', async () => {
+    let closed = false
+    const pollStarted = Promise.withResolvers<undefined>()
+    const pending: (() => void)[] = []
+    const bridge = new FakeBridge(({ tool, args }) => {
+      if (tool === 'exec_command') return { output: '', exit_code: null, session_id: 'repl' }
+      if (args.action === 'close') closed = true
+      if (args.action !== 'poll') return { output: '', exit_code: null, session_id: 'repl' }
+      if (closed) return { output: '', exit_code: 0 }
+      pollStarted.resolve(undefined)
+      return new Promise((resolve) => { pending.push(() => { resolve({ output: '', exit_code: null, session_id: 'repl' }) }) })
+    })
+    const provider = new BrokerSubprocessRuntime(new Context(), { pollMs: 1 }, bridge)
+    const handle = provider.spawn(spawnSpec({ stdio: { stdin: 'pipe', stdout: { maxBytes: 1024 }, stderr: { maxBytes: 1024 } } }))
+    await pollStarted.promise
+    // The in-flight poll uses the broker's short default wait, which bounds how
+    // long the write below queues; release it as that broker wait would.
+    expect(bridge.calls.at(-1)?.args).not.toHaveProperty('yield_time_ms')
+    const written = new Promise<void>((resolve, reject) => {
+      handle.stdin!.write('1+1\n', (error) => { if (error) reject(error); else resolve() })
+    })
+    pending.shift()!()
+    await written
+    handle.stdin!.end()
+    while (!closed) { pending.shift()?.(); await new Promise(resolve => setTimeout(resolve, 1)) }
+    for (const release of pending.splice(0)) release()
+    await expect(handle.done).resolves.toMatchObject({ exitCode: 0 })
+
+    const calls = bridge.calls.filter(call => call.tool === 'write_stdin')
+    const close = calls.findIndex(call => call.args.action === 'close')
+    expect(calls.map(call => call.args.action)).toContain('write')
+    for (const call of calls.slice(0, close)) expect(call.args).not.toHaveProperty('yield_time_ms')
+    expect(calls.slice(close + 1).filter(call => call.args.action === 'poll').map(call => call.args.yield_time_ms))
+      .toEqual([3_000])
+  })
+
+  it('rejects a poll wait the broker would not accept', () => {
+    for (const pollYieldMs of [100, 110_001, 1.5]) {
+      expect(() => new BrokerSubprocessRuntime(new Context(), { pollYieldMs }, new FakeBridge(() => ({}))))
+        .toThrow('pollYieldMs must be 0 or an integer from 250 through 110000')
+    }
+  })
+
   it('preserves quota exhaustion during a poll without attempting an ordinary kill', async () => {
     const quota = new BrokerInvokeError('run_quota_exceeded', 403)
     const bridge = new FakeBridge(({ tool }) => {

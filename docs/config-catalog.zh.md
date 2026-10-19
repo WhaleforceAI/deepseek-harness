@@ -1717,6 +1717,12 @@ export interface Config {
 export interface Config extends BrokerBridgeConfig {
   /** Native broker tools to register; an empty list registers none. */
   tools?: NativeBrokerTool[]
+  /**
+   * Minimum `yield_time_ms` for a model `write_stdin` call that only polls a
+   * running command; 0 disables the floor. The broker returns as soon as the
+   * command exits, so a longer wait only reduces repeated polling requests.
+   */
+  stdinPollYieldMs?: number
 }
 
 /** Run lease authentication and discovery-reuse policy. */
@@ -2546,6 +2552,13 @@ export interface Config {
   cwd?: string
   /** Delay between remote command polls in milliseconds. */
   pollMs?: number
+  /**
+   * Broker wait (`yield_time_ms`) for each poll of a running command that
+   * accepts no further input (no terminal, and stdin not piped or already
+   * closed); 0 sends none, so the broker's 250 ms default applies. The broker
+   * returns as soon as the command exits, so a longer wait only reduces polls.
+   */
+  pollYieldMs?: number
 }
 ```
 

@@ -35,12 +35,21 @@ export interface NativeBrokerTool {
 export interface Config extends BrokerBridgeConfig {
   /** Native broker tools to register; an empty list registers none. */
   tools?: NativeBrokerTool[]
+  /**
+   * Minimum `yield_time_ms` for a model `write_stdin` call that only polls a
+   * running command; 0 disables the floor. The broker returns as soon as the
+   * command exits, so a longer wait only reduces repeated polling requests.
+   */
+  stdinPollYieldMs?: number
 }
 
 export const Config: z<Config> = z.object({
   socketPath: z.string(),
   secret: z.string(),
   cacheDiscovery: z.boolean().default(false),
+  // Every broker call shares Agent Runtime's bridge invocation lock, so a poll
+  // wait also bounds how long a kill or another call can queue behind it.
+  stdinPollYieldMs: z.natural().max(110_000).default(3_000),
   tools: z.array(z.object({
     name: z.string(),
     description: z.string(),
@@ -297,6 +306,20 @@ export class BrokerBridge {
   }
 }
 
+/**
+ * Raise the wait of a pure `write_stdin` poll (no input, no termination) to the configured floor.
+ * @param args - model tool arguments.
+ * @param floor - minimum `yield_time_ms`; 0 leaves the arguments unchanged.
+ * @returns arguments to forward to the broker.
+ */
+export function stdinPollArguments(args: unknown, floor: number): unknown {
+  if (floor === 0 || !record(args) || !commandSessionId(args.session_id)) return args
+  if ((args.chars !== undefined && args.chars !== '') || args.terminate === true) return args
+  if (args.action !== undefined && args.action !== 'poll') return args
+  if (typeof args.yield_time_ms === 'number' && args.yield_time_ms >= floor) return args
+  return { ...args, yield_time_ms: floor }
+}
+
 export const name = 'runtime-broker'
 export const inject = ['tools', 'agents']
 
@@ -318,6 +341,9 @@ export function apply(ctx: Context, config: Config): void {
     return next()
   })
   for (const tool of config.tools ?? []) {
+    const properties = record(tool.inputSchema) && record(tool.inputSchema.properties) ? tool.inputSchema.properties : {}
+    const pollFloor = tool.name === 'write_stdin' && Object.hasOwn(properties, 'yield_time_ms')
+      ? config.stdinPollYieldMs ?? 0 : 0
     ctx.effect(() => ctx.tools.register({
       name: tool.name,
       description: tool.description,
@@ -332,7 +358,8 @@ export function apply(ctx: Context, config: Config): void {
         }],
       },
       timeoutMs: 120_000,
-      execute: (args: unknown, exec: { signal: AbortSignal }) => bridge.invoke(tool.name, args, exec.signal),
+      execute: (args: unknown, exec: { signal: AbortSignal }) =>
+        bridge.invoke(tool.name, stdinPollArguments(args, pollFloor), exec.signal),
     }))
   }
 }

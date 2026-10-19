@@ -41,17 +41,28 @@ export interface Config {
   cwd?: string
   /** Delay between remote command polls in milliseconds. */
   pollMs?: number
+  /**
+   * Broker wait (`yield_time_ms`) for each poll of a running command that
+   * accepts no further input (no terminal, and stdin not piped or already
+   * closed); 0 sends none, so the broker's 250 ms default applies. The broker
+   * returns as soon as the command exits, so a longer wait only reduces polls.
+   */
+  pollYieldMs?: number
 }
 
 interface ResolvedConfig extends Config {
   cwd: string
   pollMs: number
+  pollYieldMs: number
 }
 
 /** Loader schema for {@link BrokerSubprocessRuntime}. */
 export const Config: z<Config> = z.object({
   cwd: z.string().default('/workspace'),
   pollMs: z.number().default(100),
+  // Every broker call shares Agent Runtime's bridge invocation lock, so a poll
+  // wait also bounds how long a kill or another call can queue behind it.
+  pollYieldMs: z.natural().max(110_000).default(3_000),
 })
 
 type BrokerInvoker = Pick<BrokerBridge, 'invoke'> & Partial<Pick<BrokerBridge, 'terminalError'>>
@@ -278,6 +289,9 @@ class BrokerSubprocessHandle implements SubprocessHandle {
   private readonly stdoutReader: BrokerOutputReader | undefined
   private readonly stderrReader: BrokerOutputReader | undefined
   private controlTail: Promise<unknown> = Promise.resolve()
+  // Input queues behind an in-flight poll, so a long poll wait is used only
+  // while no stdin write or close can arrive; kill aborts the poll instead.
+  private inputOpen: boolean
   private sessionId: BrokerSessionId | undefined
   private settled = false
 
@@ -285,6 +299,7 @@ class BrokerSubprocessHandle implements SubprocessHandle {
     private readonly bridge: BrokerInvoker,
     private readonly spec: SubprocessSpawnSpec,
     private readonly pollMs: number,
+    private readonly pollYieldMs: number,
     private readonly tty: boolean,
   ) {
     this.stdout = spec.stdio.stdout === 'pipe' || tty ? new PassThrough() : undefined
@@ -298,6 +313,7 @@ class BrokerSubprocessHandle implements SubprocessHandle {
     this.stdin = spec.stdio.stdin === 'pipe'
       ? new BrokerStdin((action, chars) => this.sendInput(action, chars))
       : undefined
+    this.inputOpen = tty || this.stdin !== undefined
     this.ready = this.readyState.promise
     this.done = this.run()
     void this.ready.catch(() => {})
@@ -339,6 +355,7 @@ class BrokerSubprocessHandle implements SubprocessHandle {
     const sessionId = this.sessionId ?? await this.sessionState.promise
     if (sessionId === undefined || this.settled) throw new Error('subprocess-broker: process input is closed')
     const result = await this.input(sessionId, action, chars)
+    if (action === 'close' && !this.tty) this.inputOpen = false
     this.append(result)
   }
 
@@ -373,7 +390,7 @@ class BrokerSubprocessHandle implements SubprocessHandle {
         // more after an abort.
         // oxlint-disable-next-line typescript/no-unnecessary-condition
         if (this.termination.signal.aborted) continue
-        current = await this.input(this.sessionId as BrokerSessionId, 'poll', undefined, this.termination.signal)
+        current = await this.input(this.sessionId as BrokerSessionId, 'poll', undefined, this.termination.signal, this.inputOpen ? 0 : this.pollYieldMs)
         this.append(current)
       }
       return outcome(current, this.termination.signal.aborted)
@@ -410,11 +427,13 @@ class BrokerSubprocessHandle implements SubprocessHandle {
     action: 'poll' | 'kill' | 'write' | 'close',
     chars?: string,
     signal?: AbortSignal,
+    yieldMs = 0,
   ): Promise<BrokerResult> {
     const invoke = async (): Promise<BrokerResult> => commandResult(await this.bridge.invoke('write_stdin', {
       session_id: sessionId,
       action,
       ...(chars === undefined ? {} : { chars }),
+      ...(yieldMs === 0 ? {} : { yield_time_ms: yieldMs }),
     }, signal))
     const result = this.controlTail.then(invoke, invoke)
     this.controlTail = result.then(() => undefined, () => undefined)
@@ -491,12 +510,18 @@ export class BrokerSubprocessRuntime extends SubprocessRuntime {
     this.config = {
       cwd: config.cwd ?? '/workspace',
       pollMs: config.pollMs ?? 100,
+      pollYieldMs: config.pollYieldMs ?? 3_000,
     }
     if (!posix.isAbsolute(this.config.cwd)) throw new Error('subprocess-broker: cwd must be absolute')
     if (!Number.isSafeInteger(this.config.pollMs)
       || this.config.pollMs <= 0
       || this.config.pollMs > MAX_TIMER_DELAY_MS) {
       throw new Error(`subprocess-broker: pollMs must be a positive safe integer no greater than ${MAX_TIMER_DELAY_MS}`)
+    }
+    // The broker accepts yield_time_ms from 250 through 300000; 0 omits it.
+    if (!Number.isSafeInteger(this.config.pollYieldMs) || this.config.pollYieldMs < 0 || this.config.pollYieldMs > 110_000
+      || (this.config.pollYieldMs > 0 && this.config.pollYieldMs < 250)) {
+      throw new Error('subprocess-broker: pollYieldMs must be 0 or an integer from 250 through 110000')
     }
     ctx.effect(() => async () => {
       this.disposing = true
@@ -583,7 +608,7 @@ export class BrokerSubprocessRuntime extends SubprocessRuntime {
     assertGrace(spec.graceMs)
     assertStartRequest(spec)
     if (spec.signal?.aborted === true) throw new Error(`aborted before spawn: ${String(spec.signal.reason)}`)
-    const handle = new BrokerSubprocessHandle(this.bridge, spec, this.config.pollMs, tty)
+    const handle = new BrokerSubprocessHandle(this.bridge, spec, this.config.pollMs, this.config.pollYieldMs, tty)
     this.live.add(handle)
     const release = (): void => { this.live.delete(handle) }
     void handle.done.then(release, () => {

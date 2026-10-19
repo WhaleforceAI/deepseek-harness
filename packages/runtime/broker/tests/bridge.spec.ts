@@ -294,6 +294,51 @@ describe('run-owned bridge', () => {
     await expect(bridge.invoke('stat_file', {})).rejects.toThrow('runtime-broker: bridge disposed')
   })
 
+  it('raises only pure write_stdin polls to the poll floor', () => {
+    const floor = 10_000
+    expect(RuntimeBroker.stdinPollArguments({ session_id: 'p1' }, floor)).toEqual({ session_id: 'p1', yield_time_ms: floor })
+    expect(RuntimeBroker.stdinPollArguments({ session_id: 7, action: 'poll', chars: '', yield_time_ms: 250 }, floor))
+      .toEqual({ session_id: 7, action: 'poll', chars: '', yield_time_ms: floor })
+    for (const args of [
+      { session_id: 'p1', chars: 'y\n' },
+      { session_id: 'p1', terminate: true },
+      { session_id: 'p1', action: 'kill' },
+      { session_id: '__all__' },
+      { session_id: 'p1', yield_time_ms: 30_000 },
+      'not an object',
+    ]) expect(RuntimeBroker.stdinPollArguments(args, floor)).toBe(args)
+    const poll = { session_id: 'p1' }
+    expect(RuntimeBroker.stdinPollArguments(poll, 0)).toBe(poll)
+  })
+
+  it('forwards the poll floor only for a write_stdin tool whose schema accepts yield_time_ms', async () => {
+    const forwarded: Request[] = []
+    const { config } = await harness((request) => {
+      forwarded.push(request)
+      return { ok: true, result: { output: '', exit_code: null, signal: null, session_id: 'p1' } }
+    })
+    const ctx = new Context()
+    cleanups.push(() => ctx.fiber.dispose())
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(AgentRegistry)
+    const schema = (properties: Record<string, unknown>) => ({ type: 'object', properties })
+    await ctx.plugin(RuntimeBroker, {
+      ...config,
+      tools: [
+        { name: 'write_stdin', description: 'Poll.', inputSchema: schema({ session_id: {}, yield_time_ms: {} }), outputLimitBytes: 1024 },
+        { name: 'exec_command', description: 'Run.', inputSchema: schema({ cmd: {}, yield_time_ms: {} }), outputLimitBytes: 1024 },
+      ],
+    })
+    const exec = { signal: new AbortController().signal } as never
+    await ctx.tools.get('write_stdin')!.execute({ session_id: 'p1' }, exec)
+    await ctx.tools.get('exec_command')!.execute({ cmd: 'sleep 60', yield_time_ms: 250 }, exec)
+    expect(forwarded.map(request => request.arguments)).toEqual([
+      { session_id: 'p1', yield_time_ms: 3_000 },
+      { cmd: 'sleep 60', yield_time_ms: 250 },
+    ])
+  })
+
   it('aborts already-dispatched siblings with the original quota error', async () => {
     const received = Promise.withResolvers<undefined>()
     const pending = Promise.withResolvers<unknown>()

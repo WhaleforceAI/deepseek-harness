@@ -33,6 +33,7 @@ Mount this plugin once in the [Agent Runtime bundle](../../bundle/agent-runtime/
 | `secret` | required | Run authentication secret of at least 32 characters. |
 | `tools` | `[]` | Native tool definitions registered with the tool registry. |
 | `cacheDiscovery` | `false` | Enable discovery reuse only when this run owns every workspace writer. |
+| `stdinPollYieldMs` | `3000` | Minimum `yield_time_ms` for a model `write_stdin` call that only polls a command (no `chars`, no termination); `0` disables it. The broker returns as soon as the command exits. |
 
 The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-runtime-broker) owns the complete configuration. Enable `cacheDiscovery` only when every workspace mutation passes through this run's broker operations.
 
