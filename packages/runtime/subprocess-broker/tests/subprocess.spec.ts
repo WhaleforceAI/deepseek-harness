@@ -66,7 +66,7 @@ describe('BrokerSubprocessRuntime', () => {
     }
 
     expect(await polls(0)).toBe(239)
-    expect(await polls()).toBe(6)
+    expect(await polls()).toBe(20)
   })
 
   it('keeps polls short while stdin is open so a write is not queued behind a long poll', async () => {
@@ -102,7 +102,7 @@ describe('BrokerSubprocessRuntime', () => {
     expect(calls.map(call => call.args.action)).toContain('write')
     for (const call of calls.slice(0, close)) expect(call.args).not.toHaveProperty('yield_time_ms')
     expect(calls.slice(close + 1).filter(call => call.args.action === 'poll').map(call => call.args.yield_time_ms))
-      .toEqual([10_000])
+      .toEqual([3_000])
   })
 
   it('rejects a poll wait the broker would not accept', () => {

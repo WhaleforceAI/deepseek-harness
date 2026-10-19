@@ -60,8 +60,9 @@ interface ResolvedConfig extends Config {
 export const Config: z<Config> = z.object({
   cwd: z.string().default('/workspace'),
   pollMs: z.number().default(100),
-  // The broker's exec_command default wait; below the 120 s broker tool timeout.
-  pollYieldMs: z.natural().max(110_000).default(10_000),
+  // Every broker call shares Agent Runtime's bridge invocation lock, so a poll
+  // wait also bounds how long a kill or another call can queue behind it.
+  pollYieldMs: z.natural().max(110_000).default(3_000),
 })
 
 type BrokerInvoker = Pick<BrokerBridge, 'invoke'> & Partial<Pick<BrokerBridge, 'terminalError'>>
@@ -509,7 +510,7 @@ export class BrokerSubprocessRuntime extends SubprocessRuntime {
     this.config = {
       cwd: config.cwd ?? '/workspace',
       pollMs: config.pollMs ?? 100,
-      pollYieldMs: config.pollYieldMs ?? 10_000,
+      pollYieldMs: config.pollYieldMs ?? 3_000,
     }
     if (!posix.isAbsolute(this.config.cwd)) throw new Error('subprocess-broker: cwd must be absolute')
     if (!Number.isSafeInteger(this.config.pollMs)

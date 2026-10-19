@@ -334,7 +334,7 @@ describe('run-owned bridge', () => {
     await ctx.tools.get('write_stdin')!.execute({ session_id: 'p1' }, exec)
     await ctx.tools.get('exec_command')!.execute({ cmd: 'sleep 60', yield_time_ms: 250 }, exec)
     expect(forwarded.map(request => request.arguments)).toEqual([
-      { session_id: 'p1', yield_time_ms: 10_000 },
+      { session_id: 'p1', yield_time_ms: 3_000 },
       { cmd: 'sleep 60', yield_time_ms: 250 },
     ])
   })

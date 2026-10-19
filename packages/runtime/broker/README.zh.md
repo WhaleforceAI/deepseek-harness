@@ -33,7 +33,7 @@ kind: "package-reference"
 | `secret` | 必填 | 至少 32 个字符的运行认证密钥。 |
 | `tools` | `[]` | 注册到工具 registry（注册表）的原生工具定义。 |
 | `cacheDiscovery` | `false` | 仅当此运行持有所有工作区写入者时启用发现结果复用。 |
-| `stdinPollYieldMs` | `10000` | 模型仅轮询命令（无 `chars`、不终止）的 `write_stdin` 调用的最小 `yield_time_ms`；`0` 表示关闭。命令退出后 broker 立即返回。 |
+| `stdinPollYieldMs` | `3000` | 模型仅轮询命令（无 `chars`、不终止）的 `write_stdin` 调用的最小 `yield_time_ms`；`0` 表示关闭。命令退出后 broker 立即返回。 |
 
 生成的[配置目录](../../../docs/config-catalog.zh.md#deepseek-aidsh-runtime-broker)持有完整配置。仅当每次工作区修改都经过此运行的 broker 操作时，才启用 `cacheDiscovery`。
 

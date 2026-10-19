@@ -47,8 +47,9 @@ export const Config: z<Config> = z.object({
   socketPath: z.string(),
   secret: z.string(),
   cacheDiscovery: z.boolean().default(false),
-  // The broker's exec_command default wait; stays below the 120 s tool timeout.
-  stdinPollYieldMs: z.natural().max(110_000).default(10_000),
+  // Every broker call shares Agent Runtime's bridge invocation lock, so a poll
+  // wait also bounds how long a kill or another call can queue behind it.
+  stdinPollYieldMs: z.natural().max(110_000).default(3_000),
   tools: z.array(z.object({
     name: z.string(),
     description: z.string(),
