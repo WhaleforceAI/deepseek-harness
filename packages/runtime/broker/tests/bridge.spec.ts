@@ -32,7 +32,10 @@ async function harness(reply: (request: Request) => unknown) {
     })
   })
   const config = { socketPath: join(directory, 'bridge.sock'), secret: 'a'.repeat(32), cacheDiscovery: true }
-  await new Promise<void>(resolve => server.listen(config.socketPath, resolve))
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject)
+    server.listen(config.socketPath, resolve)
+  })
   const bridge = new RuntimeBroker.BrokerBridge(config)
   cleanups.push(async () => {
     bridge.dispose()
@@ -102,32 +105,33 @@ describe('run-owned bridge', () => {
     expect(bridge.cacheAllowed).toBe(true)
   })
 
-  it('keeps caching disabled after all overlapping commands exit because descendants may survive', async () => {
-    let nextSession = 0
-    const { bridge } = await harness(request => ({ ok: true, result: request.tool === 'exec_command'
-      ? { session_id: ++nextSession }
-      : request.arguments.action === 'kill' ? { exit_code: 137 } : { session_id: request.arguments.session_id } }))
-    await bridge.invoke('exec_command', {})
-    await bridge.invoke('exec_command', {})
-    expect(bridge.cacheAllowed).toBe(false)
-    await bridge.invoke('write_stdin', { session_id: 1, chars: 'touch AGENTS.md\n' })
-    await bridge.invoke('write_stdin', { session_id: 1, action: 'kill' })
-    expect(bridge.cacheAllowed).toBe(false)
-    await bridge.invoke('write_stdin', { session_id: 2, action: 'kill' })
-    expect(bridge.cacheAllowed).toBe(false)
-    expect(bridge.generation).toBe(10)
+  it('advances command epochs independently from non-command invalidations', async () => {
+    const { bridge } = await harness(() => ({ ok: true, result: { exit_code: 0 } }))
+    expect(bridge.commandEpoch).toBe(0)
+    expect(bridge.discoveryGeneration).toBe(0)
+    for (const tool of ['exec_command', 'write_stdin', 'exec_command']) await bridge.invoke(tool, {})
+    expect(bridge.commandEpoch).toBe(3)
+    expect(bridge.generation).toBe(6)
+    expect(bridge.discoveryGeneration).toBe(0)
+    expect(bridge.cacheAllowed).toBe(true)
+    await bridge.invoke('write_file', {})
+    expect(bridge.discoveryGeneration).toBe(2)
+    expect(bridge.commandEpoch).toBe(3)
+    bridge.invalidate()
+    expect(bridge.discoveryGeneration).toBe(3)
   })
 
-  it.each(['exec_command', 'write_stdin'])('disables reuse permanently at first %s dispatch even on immediate exit', async (tool) => {
+  it.each(['exec_command', 'write_stdin'])('blocks caching during %s and retains its epoch on failure', async (tool) => {
     const response = Promise.withResolvers<unknown>()
     const { bridge } = await harness(() => response.promise)
     const command = bridge.invoke(tool, {})
     expect(bridge.cacheAllowed).toBe(false)
-    response.resolve({ ok: true, result: { exit_code: 0 } })
-    await command
-    expect(bridge.cacheAllowed).toBe(false)
-    bridge.invalidate()
-    expect(bridge.cacheAllowed).toBe(false)
+    expect(bridge.commandEpoch).toBe(1)
+    response.resolve({ ok: false, error: { code: 'command_failed', status: 500 } })
+    await expect(command).rejects.toBeInstanceOf(RuntimeBroker.BrokerInvokeError)
+    expect(bridge.cacheAllowed).toBe(true)
+    expect(bridge.commandEpoch).toBe(1)
+    expect(bridge.generation).toBe(2)
   })
 
   it('notifies listing observers across direct/native calls and removes subscriptions', async () => {

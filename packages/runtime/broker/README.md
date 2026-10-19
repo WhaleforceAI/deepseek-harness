@@ -44,7 +44,7 @@ The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-a
 <details>
 <summary>Implementation internals — click to expand</summary>
 
-The [bridge owner](src/index.ts) advances its generation before mutation dispatch and after settlement. Pending writes disable discovery reuse. The first command or stdin dispatch disables reuse for the rest of the run, because a completed command can leave detached descendants that still modify the workspace. Successful native listings notify the filesystem provider so contradictory observations invalidate its cache.
+The [bridge owner](src/index.ts) advances its generation before mutation dispatch and after settlement. Pending mutations block discovery reuse and fills; writes clear cached observations. Each command or stdin dispatch advances the command epoch. The next discovery inspection without a pending mutation revalidates cached observations through parent-directory listings before reuse; concurrent inspections share that check once per epoch. Successful native listings notify the filesystem provider so contradictory observations invalidate its cache.
 
 `BrokerInvokeError` retains the validated broker rejection's `code` and HTTP `status`. The first `run_quota_exceeded` latches that error, aborts in-flight bridge requests, cancels agents, and rejects further ordinary operations before opening a socket. The session records hook cancellation with `runtime-broker: run_quota_exceeded`, including denial before the first model request. Python Runtime preserves the typed terminal failure independently of the session cancellation event and owns quota-exempt remote completion. Cordis disposal closes the bridge and unregisters native tools; a new run creates fresh state.
 
@@ -88,7 +88,7 @@ The run owner relies on these external guarantees.
 
 - **Workspace ownership requires deployment verification.** Keep `cacheDiscovery` disabled when writers can bypass the run's broker operations.
 - **Remote cleanup belongs to Python Runtime.** Local socket disposal does not prove remote-command termination; hosted acceptance must confirm quota-exempt completion independently.
-- **Reuse ends at the first command.** Broker session completion does not prove that detached descendants stopped. Re-enabling reuse requires broker-provided proof that the whole process tree is quiescent.
+- **Epoch revalidation does not prove process-tree quiescence.** Detached descendants can mutate files after the check. Keep `cacheDiscovery` disabled when those mutations cannot be observed.
 
 <a id="dev-note"></a>
 ### Dev Note

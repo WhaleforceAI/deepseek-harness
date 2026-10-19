@@ -81,8 +81,8 @@ function record(value: unknown): value is Record<string, unknown> {
 export class BrokerBridge {
   private revision = 0
   private pendingMutations = 0
-  // ponytail: command exit does not prove descendant exit; resume reuse only with broker whole-tree quiescence proof.
-  private commandDispatched = false
+  private discoveryRevision = 0
+  private commands = 0
   private readonly lifetime = new AbortController()
   private terminal: BrokerInvokeError | undefined
   private readonly terminalListeners = new Set<(error: BrokerInvokeError) => void>()
@@ -96,16 +96,19 @@ export class BrokerBridge {
 
   /** Current filesystem mutation generation. */
   get generation(): number { return this.revision }
-  /** Whether discovery observations can be reused or stored. */
+  /** Generation of non-command invalidations; command epochs require separate revalidation. */
+  get discoveryGeneration(): number { return this.discoveryRevision }
+  /** Number of command and stdin dispatches, including failed requests. */
+  get commandEpoch(): number { return this.commands }
+  /** Whether mutation-free discovery checks and storage are permitted; reuse also requires epoch revalidation. */
   get cacheAllowed(): boolean {
     return this.config.cacheDiscovery === true && !this.terminal && !this.lifetime.signal.aborted && !this.pendingMutations
-      && !this.commandDispatched
   }
   /** The first quota denial, retained until disposal. */
   get terminalError(): BrokerInvokeError | undefined { return this.terminal }
 
   /** Advance the observation generation, including listing contradictions. */
-  invalidate(): void { this.revision++ }
+  invalidate(): void { this.revision++; this.discoveryRevision++ }
 
   /** Reject terminal, disposed, or aborted work before using cached data or opening a socket.
    * @param signal - optional caller cancellation.
@@ -152,8 +155,12 @@ export class BrokerBridge {
     this.assertAvailable(signal)
     const command = tool === 'exec_command' || tool === 'write_stdin'
     const mutation = command || tool === 'write_file'
-    if (command) this.commandDispatched = true
-    if (mutation) { this.pendingMutations++; this.invalidate() }
+    if (command) this.commands++
+    if (mutation) {
+      this.pendingMutations++
+      if (command) this.revision++
+      else this.invalidate()
+    }
     try {
       const result = await this.exchange(tool, args, signal)
       if (tool === 'list_files' && record(args) && typeof args.path === 'string') {
@@ -166,7 +173,11 @@ export class BrokerBridge {
     } catch (error) {
       throw this.terminal ?? error
     } finally {
-      if (mutation) { this.pendingMutations--; this.invalidate() }
+      if (mutation) {
+        this.pendingMutations--
+        if (command) this.revision++
+        else this.invalidate()
+      }
     }
   }
 

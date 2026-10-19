@@ -44,7 +44,7 @@ kind: "package-reference"
 <details>
 <summary>实现内部机制 — 点击展开</summary>
 
-[bridge 所有者](src/index.ts)在修改派发前及完成后推进代次。待完成写入会禁用发现结果复用。第一次命令或 stdin 派发会在该运行余下时间禁用复用，因为已完成的命令仍可能留下继续修改工作区的脱离后代进程。成功的原生目录列表会通知文件系统 provider，使相互矛盾的观察结果令缓存失效。
+[bridge 所有者](src/index.ts)在修改派发前及完成后推进代次。待完成修改会阻止发现结果复用及缓存填充；写入会清除缓存结果。每次命令或 stdin 派发都推进命令周期。没有待完成修改时，下一次发现检查会先通过父目录列表重新验证缓存结果，再允许复用；并发检查在每个周期共享一次验证。成功的原生目录列表会通知文件系统 provider，使相互矛盾的观察结果令缓存失效。
 
 `BrokerInvokeError` 保留经过验证的 broker 拒绝的 `code` 和 HTTP `status`。第一个 `run_quota_exceeded` 会锁定该错误、中止进行中的 bridge 请求、取消 agent（智能体），并在打开 socket 之前拒绝后续普通操作。会话通过 hook 取消记录 `runtime-broker: run_quota_exceeded`，包括第一次模型请求之前发生的拒绝。Python Runtime 独立于会话取消事件保留带类型的终止失败，并负责免配额的远程完成操作。Cordis 释放过程关闭 bridge 并注销原生工具；新运行创建全新状态。
 
@@ -88,7 +88,7 @@ kind: "package-reference"
 
 - **工作区所有权需要部署验证。** 写入者能够绕过该运行的 broker 操作时，保持 `cacheDiscovery` 禁用。
 - **远程清理由 Python Runtime 负责。** 本地 socket 释放不能证明远程命令已终止；托管环境验收必须独立确认免配额完成操作。
-- **复用在第一条命令时结束。** broker 会话完成不能证明脱离的后代进程已经停止。重新启用复用需要 broker 提供整个进程树已静止的证明。
+- **周期重新验证不能证明进程树已静止。** 脱离的后代进程可以在检查后修改文件。无法观察这些修改时，保持 `cacheDiscovery` 禁用。
 
 <a id="dev-note"></a>
 ### 开发笔记

@@ -195,6 +195,76 @@ function cachedFilesystem(invoke: FakeBridge['invoke']): { fs: BrokerFileSystem;
 }
 
 describe('discovery metadata cache', () => {
+  it('revalidates cached parents once per observed command epoch', async () => {
+    const file = { type: 'file', size: 1, mtime_ms: 1, mode: 0o600 }
+    const invoke = vi.fn(async (tool: string) => tool === 'list_files'
+      ? { entries: [{ name: 'AGENTS.md', ...file }] }
+      : file)
+    const { fs, bridge } = cachedFilesystem(invoke)
+    const epoch = vi.spyOn(bridge, 'commandEpoch', 'get').mockReturnValue(0)
+    const turn = async (): Promise<void> => {
+      for (const name of ['AGENTS.md', 'CLAUDE.md', 'AGENTS.local.md', 'CLAUDE.local.md', '.git', '.skills']) {
+        await fs.stat(await fs.resolve(name))
+      }
+      await fs.lstat('AGENTS.md')
+      await fs.lstat('CLAUDE.md')
+    }
+    // A full listing must include every cached present path to retain eight entries.
+    invoke.mockImplementation(async tool => tool === 'list_files' ? {
+      entries: ['AGENTS.md', 'CLAUDE.md', 'AGENTS.local.md', 'CLAUDE.local.md', '.git', '.skills']
+        .map(name => ({ name, ...file })),
+    } : file)
+    await turn()
+    expect(invoke).toHaveBeenCalledTimes(8)
+    await turn()
+    expect(invoke).toHaveBeenCalledTimes(8)
+    epoch.mockReturnValue(1)
+    await turn()
+    expect(invoke.mock.calls.filter(([tool]) => tool === 'stat_file')).toHaveLength(8)
+    expect(invoke.mock.calls.filter(([tool]) => tool === 'list_files')).toHaveLength(1)
+    await turn()
+    expect(invoke).toHaveBeenCalledTimes(9)
+    epoch.mockReturnValue(2)
+    await turn()
+    // The old command-disabled behavior adds eight stats every turn; this adds one listing per epoch.
+    expect(invoke).toHaveBeenCalledTimes(10)
+  })
+
+  it.each([
+    { name: 'changed metadata', listing: { entries: [{ name: 'AGENTS.md', type: 'file', size: 2, mtime_ms: 1 }] } },
+    { name: 'removed file', listing: { entries: [] } },
+    { name: 'followed symlink', listing: { entries: [{ name: 'AGENTS.md', type: 'symlink', mtime_ms: 1 }] } },
+    { name: 'truncated listing', listing: { entries: [], truncated: true } },
+    { name: 'malformed listing', listing: { entries: [{ name: 'AGENTS.md' }] } },
+  ])('refreshes cached discovery after $name', async ({ listing }) => {
+    const invoke = vi.fn(async (tool: string) => tool === 'list_files'
+      ? listing : { type: 'file', size: 1, mtime_ms: 1 })
+    const { fs, bridge } = cachedFilesystem(invoke)
+    const target = await fs.resolve('AGENTS.md')
+    await fs.stat(target)
+    vi.spyOn(bridge, 'commandEpoch', 'get').mockReturnValue(1)
+    await fs.stat(target)
+    await fs.stat(target)
+    expect(invoke.mock.calls.map(([tool]) => tool)).toEqual(['stat_file', 'list_files', 'stat_file'])
+  })
+
+  it('discards revalidation across write invalidation before filling a fresh epoch', async () => {
+    const listing = Promise.withResolvers<unknown>()
+    const invoke = vi.fn(async (tool: string) => tool === 'list_files' ? listing.promise : { exists: false })
+    const { fs, bridge } = cachedFilesystem(invoke)
+    const target = await fs.resolve('AGENTS.md')
+    await fs.stat(target)
+    vi.spyOn(bridge, 'commandEpoch', 'get').mockReturnValue(1)
+    const pending = fs.stat(target)
+    expect(invoke.mock.calls.map(([tool]) => tool)).toEqual(['stat_file', 'list_files'])
+    bridge.invalidate()
+    listing.resolve({ entries: [] })
+    await pending
+    await fs.stat(target)
+    await fs.stat(target)
+    expect(invoke.mock.calls.map(([tool]) => tool)).toEqual(['stat_file', 'list_files', 'stat_file', 'stat_file'])
+  })
+
   it('requires explicit workspace exclusivity opt-in', async () => {
     const bridge = new BrokerBridge({ socketPath: '/run/broker.sock', secret: 'x'.repeat(32) })
     const invoke = vi.fn(async () => ({ exists: false }))

@@ -36,7 +36,7 @@ export interface Config {
 }
 
 type ResolvedConfig = Required<Config>
-type BrokerInvoker = Pick<BrokerBridge, 'invoke' | 'generation' | 'cacheAllowed' | 'assertAvailable' | 'invalidate' | 'onListing' | 'terminalError'>
+type BrokerInvoker = Pick<BrokerBridge, 'invoke' | 'generation' | 'discoveryGeneration' | 'commandEpoch' | 'cacheAllowed' | 'assertAvailable' | 'invalidate' | 'onListing' | 'terminalError'>
 type CachedStat = { stat: BrokerStat | undefined } | { error: BrokerInvokeError }
 
 /** Loader schema for {@link BrokerFileSystem}. */
@@ -177,6 +177,8 @@ export class BrokerFileSystem extends FileSystem {
   readonly config: ResolvedConfig
   private readonly discovery = new Map<string, CachedStat>()
   private discoveryGeneration = -1
+  private discoveryEpoch = 0
+  private revalidation: Promise<void> | undefined
   private readonly locks = new Map<string, Promise<unknown>>()
 
   /** @inheritdoc */
@@ -377,9 +379,9 @@ export class BrokerFileSystem extends FileSystem {
   }
 
   private syncDiscovery(): void {
-    if (this.discoveryGeneration === this.bridge.generation) return
+    if (this.discoveryGeneration === this.bridge.discoveryGeneration) return
     this.discovery.clear()
-    this.discoveryGeneration = this.bridge.generation
+    this.discoveryGeneration = this.bridge.discoveryGeneration
   }
 
   private remember(key: string, value: CachedStat, generation: number): void {
@@ -392,6 +394,8 @@ export class BrokerFileSystem extends FileSystem {
   }
 
   private observeListing(path: string, result: unknown): void {
+    // Unchecked epochs are reconciled together by revalidateDiscovery before reuse.
+    if (this.discoveryEpoch !== this.bridge.commandEpoch) return
     let entries: BrokerListEntry[]
     try {
       entries = listResult(result)
@@ -418,6 +422,58 @@ export class BrokerFileSystem extends FileSystem {
     }
   }
 
+  private async revalidateDiscovery(signal?: AbortSignal): Promise<void> {
+    if (this.revalidation !== undefined) {
+      await this.revalidation
+      return
+    }
+    if (!this.bridge.cacheAllowed || this.discoveryEpoch === this.bridge.commandEpoch) return
+    const epoch = this.bridge.commandEpoch
+    const generation = this.bridge.generation
+    const check = async (): Promise<void> => {
+      const parents = new Map<string, string[]>()
+      for (const key of this.discovery.keys()) {
+        const parent = posix.dirname(key.slice(2))
+        const keys = parents.get(parent) ?? []
+        keys.push(key)
+        parents.set(parent, keys)
+      }
+      for (const [parent, keys] of parents) {
+        let entries: BrokerListEntry[] | undefined
+        try {
+          const result = await this.bridge.invoke('list_files', { path: parent, limit: MAX_LIST_ENTRIES }, signal)
+          const response = record(result, 'list_files')
+          const listed = listResult(result)
+          if (listed.length < MAX_LIST_ENTRIES && (response.truncated === undefined || response.truncated === false)
+            && new Set(listed.map(entry => entry.name)).size === listed.length) entries = listed
+        } catch {
+          // Failed listings cannot validate absence; discovery falls back to live stats.
+        }
+        if (generation !== this.bridge.generation || !this.bridge.cacheAllowed) {
+          this.discovery.clear()
+          return
+        }
+        const byName = new Map(entries?.map(entry => [entry.name, entry]))
+        for (const key of keys) {
+          const cached = this.discovery.get(key)
+          if (cached === undefined) continue
+          const entry = byName.get(posix.basename(key.slice(2)))
+          const previous = 'stat' in cached ? cached.stat : undefined
+          if (entries === undefined || (key.startsWith('S:') && entry?.type === 'symlink')
+            || (entry === undefined ? previous !== undefined : previous === undefined
+              || previous.type !== entry.type || previous.size !== entry.size
+              || previous.mtimeMs !== entry.mtimeMs || previous.mode !== entry.mode)) {
+            this.discovery.delete(key)
+          }
+        }
+      }
+      if (generation === this.bridge.generation && this.bridge.cacheAllowed) this.discoveryEpoch = epoch
+    }
+    this.revalidation = check()
+    try { await this.revalidation }
+    finally { this.revalidation = undefined }
+  }
+
   private async inspect(path: string, followSymlinks: boolean, signal?: AbortSignal, discovery = false): Promise<BrokerStat | undefined> {
     const normalized = posix.resolve(this.config.cwd, path)
     const key = `${followSymlinks ? 'S' : 'L'}:${normalized}`
@@ -427,8 +483,15 @@ export class BrokerFileSystem extends FileSystem {
       this.bridge.assertAvailable()
       assertNotAborted(signal, 'stat')
       this.syncDiscovery()
+      const eligible = discovery && DISCOVERY_NAMES.has(posix.basename(normalized))
+      if (eligible && this.bridge.cacheAllowed && this.discoveryEpoch !== this.bridge.commandEpoch) {
+        await this.revalidateDiscovery(signal)
+      }
+      this.bridge.assertAvailable()
+      assertNotAborted(signal, 'stat')
+      this.syncDiscovery()
       generation = this.bridge.generation
-      cacheable = discovery && DISCOVERY_NAMES.has(posix.basename(normalized)) && this.bridge.cacheAllowed
+      cacheable = eligible && this.bridge.cacheAllowed && this.discoveryEpoch === this.bridge.commandEpoch
       const cached = cacheable ? this.discovery.get(key) : undefined
       if (cached !== undefined) {
         if ('error' in cached) throw cached.error
