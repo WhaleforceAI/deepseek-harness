@@ -265,6 +265,66 @@ describe('discovery metadata cache', () => {
     expect(invoke.mock.calls.map(([tool]) => tool)).toEqual(['stat_file', 'list_files', 'stat_file', 'stat_file'])
   })
 
+  it.each([[], [{ name: 'AGENTS.md', type: 'symlink', mtime_ms: 1 }]])(
+    'evicts cached workspace rejection on command revalidation with entries %j', async (entries) => {
+      const denial = new BrokerInvokeError('file_path_outside_workspace', 422)
+      const invoke = vi.fn<FakeBridge['invoke']>()
+        .mockRejectedValueOnce(denial)
+        .mockResolvedValueOnce({ entries })
+        .mockResolvedValue({ exists: false })
+      const { fs, bridge } = cachedFilesystem(invoke)
+      const target = await fs.resolve('AGENTS.md')
+      await expect(fs.stat(target)).rejects.toMatchObject({ cause: denial })
+      await expect(fs.stat(target)).rejects.toMatchObject({ cause: denial })
+      vi.spyOn(bridge, 'commandEpoch', 'get').mockReturnValue(1)
+      expect(await fs.stat(target)).toBeUndefined()
+      expect(await fs.stat(target)).toBeUndefined()
+      expect(invoke.mock.calls.map(([tool]) => tool)).toEqual(['stat_file', 'list_files', 'stat_file'])
+    },
+  )
+
+  it('retains only cached absence when a complete revalidation omits the name', async () => {
+    const invoke = vi.fn(async (tool: string) => tool === 'list_files' ? { entries: [] } : { exists: false })
+    const { fs, bridge } = cachedFilesystem(invoke)
+    const target = await fs.resolve('AGENTS.md')
+    await fs.stat(target)
+    vi.spyOn(bridge, 'commandEpoch', 'get').mockReturnValue(1)
+    expect(await fs.stat(target)).toBeUndefined()
+    expect(invoke.mock.calls.map(([tool]) => tool)).toEqual(['stat_file', 'list_files'])
+  })
+
+  it.each(['initiator', 'joiner'])('cancels the %s independently of shared revalidation', async (cancelled) => {
+    const listing = Promise.withResolvers<unknown>()
+    const invoke = vi.fn<FakeBridge['invoke']>(async (tool, _args, signal) => {
+      if (tool !== 'list_files') return { exists: false }
+      // A caller abort must never own the listing needed by another inspection.
+      signal?.addEventListener('abort', () => { listing.reject(signal.reason) }, { once: true })
+      return listing.promise
+    })
+    const { fs, bridge } = cachedFilesystem(invoke)
+    const target = await fs.resolve('AGENTS.md')
+    await fs.stat(target)
+    vi.spyOn(bridge, 'commandEpoch', 'get').mockReturnValue(1)
+    const firstSignal = new AbortController()
+    const secondSignal = new AbortController()
+    const first = fs.stat(target, firstSignal.signal)
+    const second = fs.stat(target, secondSignal.signal)
+    const aborted = cancelled === 'initiator' ? first : second
+    const survivor = cancelled === 'initiator' ? second : first
+    const rejection = expect(aborted).rejects.toMatchObject({ code: 'FS_ABORTED', message: 'stat aborted' })
+    const controller = cancelled === 'initiator' ? firstSignal : secondSignal
+    controller.abort()
+    // Cancellation settles before the held listing, while a third caller still joins it.
+    await rejection
+    const third = fs.stat(target)
+    expect(invoke.mock.calls.map(([tool]) => tool)).toEqual(['stat_file', 'list_files'])
+    listing.resolve({ entries: [] })
+    expect(await survivor).toBeUndefined()
+    expect(await third).toBeUndefined()
+    expect(await fs.stat(target)).toBeUndefined()
+    expect(invoke.mock.calls.map(([tool]) => tool)).toEqual(['stat_file', 'list_files'])
+  })
+
   it('requires explicit workspace exclusivity opt-in', async () => {
     const bridge = new BrokerBridge({ socketPath: '/run/broker.sock', secret: 'x'.repeat(32) })
     const invoke = vi.fn(async () => ({ exists: false }))

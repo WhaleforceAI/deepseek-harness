@@ -20,6 +20,7 @@ async function fixture() {
   const requests: Request[] = []
   const sockets = new Set<Socket>()
   let listing: unknown
+  let commandResult: unknown = { exit_code: 0 }
   let failListing = false
   let hold: ((request: Request, reply: Reply) => boolean) | undefined
   const server = createServer((socket) => {
@@ -32,7 +33,7 @@ async function fixture() {
       socket.off('data', receive)
       const request = JSON.parse(input.split('\n')[0]!) as Request
       requests.push(request)
-      let result: unknown = {}
+      let result: unknown = commandResult
       if (request.tool === 'stat_file') {
         result = request.arguments.path === '/workspace' ? { type: 'directory', mtime_ms: 1 }
           : files.get(request.arguments.path) ?? { exists: false }
@@ -72,6 +73,7 @@ async function fixture() {
     get listCalls() { return requests.filter(request => request.tool === 'list_files').length },
     set file(value: Metadata | undefined) { if (value) files.set('/workspace/AGENTS.md', value); else files.delete('/workspace/AGENTS.md') },
     set listing(value: unknown) { listing = value },
+    set commandResult(value: unknown) { commandResult = value },
     set failListing(value: boolean) { failListing = value },
     set hold(value: typeof hold) { hold = value },
     command: () => bridge.invoke('exec_command', { argv: ['true'] }),
@@ -231,6 +233,35 @@ describe.skipIf(process.platform === 'win32')('discovery cache with real broker 
     expect(await setup.fs.stat(target)).toMatchObject({ size: 5 })
     expect(await setup.fs.stat(target)).toMatchObject({ size: 5 })
     expect(setup.bridge.cacheAllowed).toBe(true)
+  })
+
+  it('keeps yielded command sessions live until every session finishes and then revalidates', async () => {
+    const setup = await fixture()
+    const target = await setup.fs.resolve('AGENTS.md')
+    await setup.fs.stat(target)
+    for (const session_id of ['first', 'second']) {
+      setup.commandResult = { session_id, exit_code: null }
+      await setup.command()
+    }
+    expect(setup.bridge.cacheAllowed).toBe(false)
+    expect(await setup.fs.stat(target)).toBeUndefined()
+    setup.file = { type: 'file', size: 1, mtime_ms: 1 }
+    expect(await setup.fs.stat(target)).toMatchObject({ size: 1 })
+    expect([setup.statCalls, setup.listCalls]).toEqual([3, 0])
+
+    setup.commandResult = { exit_code: 0 }
+    await setup.bridge.invoke('write_stdin', { session_id: 'first', chars: '' })
+    expect(setup.bridge.cacheAllowed).toBe(false)
+    setup.file = { type: 'file', size: 2, mtime_ms: 2 }
+    expect(await setup.fs.stat(target)).toMatchObject({ size: 2 })
+    expect([setup.statCalls, setup.listCalls]).toEqual([4, 0])
+
+    await setup.bridge.invoke('write_stdin', { session_id: 'second', chars: '' })
+    expect(setup.bridge.cacheAllowed).toBe(true)
+    expect(await setup.fs.stat(target)).toMatchObject({ size: 2 })
+    expect([setup.statCalls, setup.listCalls]).toEqual([5, 1])
+    await setup.fs.stat(target)
+    expect([setup.statCalls, setup.listCalls]).toEqual([5, 1])
   })
 
   it('invalidates native and filesystem writes through the shared owner', async () => {

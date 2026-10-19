@@ -139,6 +139,19 @@ function assertNotAborted(signal: AbortSignal | undefined, operation: string): v
   if (signal?.aborted === true) throw new FsError(`${operation} aborted`, 'FS_ABORTED')
 }
 
+/** Cancel only this caller's wait; shared revalidation belongs to the bridge lifetime. */
+async function waitForRevalidation(pending: Promise<void>, signal?: AbortSignal): Promise<void> {
+  assertNotAborted(signal, 'stat')
+  if (signal === undefined) return pending
+  await new Promise<void>((resolve, reject) => {
+    const abort = (): void => {
+      reject(new FsError('stat aborted', 'FS_ABORTED'))
+    }
+    signal.addEventListener('abort', abort, { once: true })
+    void pending.then(resolve, reject).finally(() => { signal.removeEventListener('abort', abort) })
+  })
+}
+
 function normalizeLineEndings(value: string): string {
   return value.replaceAll('\r\n', '\n')
 }
@@ -424,7 +437,7 @@ export class BrokerFileSystem extends FileSystem {
 
   private async revalidateDiscovery(signal?: AbortSignal): Promise<void> {
     if (this.revalidation !== undefined) {
-      await this.revalidation
+      await waitForRevalidation(this.revalidation, signal)
       return
     }
     if (!this.bridge.cacheAllowed || this.discoveryEpoch === this.bridge.commandEpoch) return
@@ -441,7 +454,7 @@ export class BrokerFileSystem extends FileSystem {
       for (const [parent, keys] of parents) {
         let entries: BrokerListEntry[] | undefined
         try {
-          const result = await this.bridge.invoke('list_files', { path: parent, limit: MAX_LIST_ENTRIES }, signal)
+          const result = await this.bridge.invoke('list_files', { path: parent, limit: MAX_LIST_ENTRIES })
           const response = record(result, 'list_files')
           const listed = listResult(result)
           if (listed.length < MAX_LIST_ENTRIES && (response.truncated === undefined || response.truncated === false)
@@ -459,7 +472,7 @@ export class BrokerFileSystem extends FileSystem {
           if (cached === undefined) continue
           const entry = byName.get(posix.basename(key.slice(2)))
           const previous = 'stat' in cached ? cached.stat : undefined
-          if (entries === undefined || (key.startsWith('S:') && entry?.type === 'symlink')
+          if ('error' in cached || entries === undefined || (key.startsWith('S:') && entry?.type === 'symlink')
             || (entry === undefined ? previous !== undefined : previous === undefined
               || previous.type !== entry.type || previous.size !== entry.size
               || previous.mtimeMs !== entry.mtimeMs || previous.mode !== entry.mode)) {
@@ -469,9 +482,8 @@ export class BrokerFileSystem extends FileSystem {
       }
       if (generation === this.bridge.generation && this.bridge.cacheAllowed) this.discoveryEpoch = epoch
     }
-    this.revalidation = check()
-    try { await this.revalidation }
-    finally { this.revalidation = undefined }
+    this.revalidation = check().finally(() => { this.revalidation = undefined })
+    await waitForRevalidation(this.revalidation, signal)
   }
 
   private async inspect(path: string, followSymlinks: boolean, signal?: AbortSignal, discovery = false): Promise<BrokerStat | undefined> {
