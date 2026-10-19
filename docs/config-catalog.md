@@ -2551,9 +2551,10 @@ export interface Config {
   /** Delay between remote command polls in milliseconds. */
   pollMs?: number
   /**
-   * Broker wait (`yield_time_ms`) for each poll of a running command; 0 sends
-   * none, so the broker's 250 ms default applies. The broker returns as soon as
-   * the command exits, so a longer wait only reduces the number of polls.
+   * Broker wait (`yield_time_ms`) for each poll of a running command that
+   * accepts no further input (no terminal, and stdin not piped or already
+   * closed); 0 sends none, so the broker's 250 ms default applies. The broker
+   * returns as soon as the command exits, so a longer wait only reduces polls.
    */
   pollYieldMs?: number
 }

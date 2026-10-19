@@ -69,6 +69,42 @@ describe('BrokerSubprocessRuntime', () => {
     expect(await polls()).toBe(6)
   })
 
+  it('keeps polls short while stdin is open so a write is not queued behind a long poll', async () => {
+    let closed = false
+    const pollStarted = Promise.withResolvers<undefined>()
+    const pending: (() => void)[] = []
+    const bridge = new FakeBridge(({ tool, args }) => {
+      if (tool === 'exec_command') return { output: '', exit_code: null, session_id: 'repl' }
+      if (args.action === 'close') closed = true
+      if (args.action !== 'poll') return { output: '', exit_code: null, session_id: 'repl' }
+      if (closed) return { output: '', exit_code: 0 }
+      pollStarted.resolve(undefined)
+      return new Promise((resolve) => { pending.push(() => { resolve({ output: '', exit_code: null, session_id: 'repl' }) }) })
+    })
+    const provider = new BrokerSubprocessRuntime(new Context(), { pollMs: 1 }, bridge)
+    const handle = provider.spawn(spawnSpec({ stdio: { stdin: 'pipe', stdout: { maxBytes: 1024 }, stderr: { maxBytes: 1024 } } }))
+    await pollStarted.promise
+    // The in-flight poll uses the broker's short default wait, which bounds how
+    // long the write below queues; release it as that broker wait would.
+    expect(bridge.calls.at(-1)?.args).not.toHaveProperty('yield_time_ms')
+    const written = new Promise<void>((resolve, reject) => {
+      handle.stdin!.write('1+1\n', (error) => { if (error) reject(error); else resolve() })
+    })
+    pending.shift()!()
+    await written
+    handle.stdin!.end()
+    while (!closed) { pending.shift()?.(); await new Promise(resolve => setTimeout(resolve, 1)) }
+    for (const release of pending.splice(0)) release()
+    await expect(handle.done).resolves.toMatchObject({ exitCode: 0 })
+
+    const calls = bridge.calls.filter(call => call.tool === 'write_stdin')
+    const close = calls.findIndex(call => call.args.action === 'close')
+    expect(calls.map(call => call.args.action)).toContain('write')
+    for (const call of calls.slice(0, close)) expect(call.args).not.toHaveProperty('yield_time_ms')
+    expect(calls.slice(close + 1).filter(call => call.args.action === 'poll').map(call => call.args.yield_time_ms))
+      .toEqual([10_000])
+  })
+
   it('rejects a poll wait the broker would not accept', () => {
     for (const pollYieldMs of [100, 110_001, 1.5]) {
       expect(() => new BrokerSubprocessRuntime(new Context(), { pollYieldMs }, new FakeBridge(() => ({}))))

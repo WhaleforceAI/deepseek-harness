@@ -42,9 +42,10 @@ export interface Config {
   /** Delay between remote command polls in milliseconds. */
   pollMs?: number
   /**
-   * Broker wait (`yield_time_ms`) for each poll of a running command; 0 sends
-   * none, so the broker's 250 ms default applies. The broker returns as soon as
-   * the command exits, so a longer wait only reduces the number of polls.
+   * Broker wait (`yield_time_ms`) for each poll of a running command that
+   * accepts no further input (no terminal, and stdin not piped or already
+   * closed); 0 sends none, so the broker's 250 ms default applies. The broker
+   * returns as soon as the command exits, so a longer wait only reduces polls.
    */
   pollYieldMs?: number
 }
@@ -287,6 +288,9 @@ class BrokerSubprocessHandle implements SubprocessHandle {
   private readonly stdoutReader: BrokerOutputReader | undefined
   private readonly stderrReader: BrokerOutputReader | undefined
   private controlTail: Promise<unknown> = Promise.resolve()
+  // Input queues behind an in-flight poll, so a long poll wait is used only
+  // while no stdin write or close can arrive; kill aborts the poll instead.
+  private inputOpen: boolean
   private sessionId: BrokerSessionId | undefined
   private settled = false
 
@@ -308,6 +312,7 @@ class BrokerSubprocessHandle implements SubprocessHandle {
     this.stdin = spec.stdio.stdin === 'pipe'
       ? new BrokerStdin((action, chars) => this.sendInput(action, chars))
       : undefined
+    this.inputOpen = tty || this.stdin !== undefined
     this.ready = this.readyState.promise
     this.done = this.run()
     void this.ready.catch(() => {})
@@ -349,6 +354,7 @@ class BrokerSubprocessHandle implements SubprocessHandle {
     const sessionId = this.sessionId ?? await this.sessionState.promise
     if (sessionId === undefined || this.settled) throw new Error('subprocess-broker: process input is closed')
     const result = await this.input(sessionId, action, chars)
+    if (action === 'close' && !this.tty) this.inputOpen = false
     this.append(result)
   }
 
@@ -383,7 +389,7 @@ class BrokerSubprocessHandle implements SubprocessHandle {
         // more after an abort.
         // oxlint-disable-next-line typescript/no-unnecessary-condition
         if (this.termination.signal.aborted) continue
-        current = await this.input(this.sessionId as BrokerSessionId, 'poll', undefined, this.termination.signal, this.pollYieldMs)
+        current = await this.input(this.sessionId as BrokerSessionId, 'poll', undefined, this.termination.signal, this.inputOpen ? 0 : this.pollYieldMs)
         this.append(current)
       }
       return outcome(current, this.termination.signal.aborted)
