@@ -135,6 +135,18 @@ function listResult(value: unknown): BrokerListEntry[] {
   })
 }
 
+/**
+ * Whether a listing entry still describes a cached stat.
+ *
+ * The broker's list_files entries carry type, size and mtime_ms but no mode,
+ * while stat_file reports mode. Mode is compared only when the listing has it;
+ * otherwise every cached existing entry would look changed after each command.
+ */
+function listingMatches(previous: BrokerStat, entry: BrokerStat): boolean {
+  return previous.type === entry.type && previous.size === entry.size && previous.mtimeMs === entry.mtimeMs
+    && (entry.mode === undefined || previous.mode === entry.mode)
+}
+
 function assertNotAborted(signal: AbortSignal | undefined, operation: string): void {
   if (signal?.aborted === true) throw new FsError(`${operation} aborted`, 'FS_ABORTED')
 }
@@ -424,15 +436,18 @@ export class BrokerFileSystem extends FileSystem {
         if (cached === undefined) continue
         // Listings describe links themselves, not their followed targets.
         if (prefix === 'S' && entry.type === 'symlink') continue
-        if ('error' in cached || cached.stat === undefined ||
-          cached.stat.type !== entry.type || cached.stat.size !== entry.size ||
-          cached.stat.mtimeMs !== entry.mtimeMs || cached.stat.mode !== entry.mode) {
+        if ('error' in cached || cached.stat === undefined || !listingMatches(cached.stat, entry)) {
           this.bridge.invalidate()
           this.syncDiscovery()
           return
         }
       }
     }
+  }
+
+  private boundaryRejection(key: string, cached: CachedStat): boolean {
+    if (!('error' in cached) || cached.error.code !== 'file_path_outside_workspace') return false
+    return posix.relative(this.config.cwd, key.slice(2)).startsWith('../')
   }
 
   private async revalidateDiscovery(signal?: AbortSignal): Promise<void> {
@@ -445,7 +460,10 @@ export class BrokerFileSystem extends FileSystem {
     const generation = this.bridge.generation
     const check = async (): Promise<void> => {
       const parents = new Map<string, string[]>()
-      for (const key of this.discovery.keys()) {
+      for (const [key, cached] of this.discovery) {
+        // A path outside the workspace is rejected by the broker whatever a
+        // command did, so its cached rejection needs no listing.
+        if (this.boundaryRejection(key, cached)) continue
         const parent = posix.dirname(key.slice(2))
         const keys = parents.get(parent) ?? []
         keys.push(key)
@@ -473,9 +491,7 @@ export class BrokerFileSystem extends FileSystem {
           const entry = byName.get(posix.basename(key.slice(2)))
           const previous = 'stat' in cached ? cached.stat : undefined
           if ('error' in cached || entries === undefined || (key.startsWith('S:') && entry?.type === 'symlink')
-            || (entry === undefined ? previous !== undefined : previous === undefined
-              || previous.type !== entry.type || previous.size !== entry.size
-              || previous.mtimeMs !== entry.mtimeMs || previous.mode !== entry.mode)) {
+            || (entry === undefined ? previous !== undefined : previous === undefined || !listingMatches(previous, entry))) {
             this.discovery.delete(key)
           }
         }
