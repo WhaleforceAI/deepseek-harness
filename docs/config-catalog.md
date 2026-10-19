@@ -1715,6 +1715,12 @@ Requires: `tools` · `agents`
 export interface Config extends BrokerBridgeConfig {
   /** Native broker tools to register; an empty list registers none. */
   tools?: NativeBrokerTool[]
+  /**
+   * Minimum `yield_time_ms` for a model `write_stdin` call that only polls a
+   * running command; 0 disables the floor. The broker returns as soon as the
+   * command exits, so a longer wait only reduces repeated polling requests.
+   */
+  stdinPollYieldMs?: number
 }
 
 /** Run lease authentication and discovery-reuse policy. */
