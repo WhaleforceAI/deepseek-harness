@@ -46,6 +46,36 @@ function spawnSpec(overrides: Partial<SubprocessSpawnSpec> = {}): SubprocessSpaw
 }
 
 describe('BrokerSubprocessRuntime', () => {
+  it('polls a 60 s command a few times with the default poll wait', async () => {
+    // A virtual broker clock: each call waits its yield_time_ms (250 ms broker
+    // default for write_stdin) or returns early when the command exits at 60 s.
+    const sixtySecondCommand = (): FakeBridge => {
+      let clock = 0
+      return new FakeBridge(({ tool, args }) => {
+        clock = Math.min(60_000, clock + (typeof args.yield_time_ms === 'number' ? args.yield_time_ms : 250))
+        if (tool === 'exec_command' || clock < 60_000) return { output: '', exit_code: null, session_id: 'build' }
+        return { output: 'done', exit_code: 0 }
+      })
+    }
+    const polls = async (pollYieldMs?: number): Promise<number> => {
+      const bridge = sixtySecondCommand()
+      const config = { pollMs: 1, ...(pollYieldMs === undefined ? {} : { pollYieldMs }) }
+      const provider = new BrokerSubprocessRuntime(new Context(), config, bridge)
+      await expect(provider.spawn(spawnSpec()).done).resolves.toMatchObject({ exitCode: 0 })
+      return bridge.calls.filter(call => call.tool === 'write_stdin').length
+    }
+
+    expect(await polls(0)).toBe(239)
+    expect(await polls()).toBe(6)
+  })
+
+  it('rejects a poll wait the broker would not accept', () => {
+    for (const pollYieldMs of [100, 110_001, 1.5]) {
+      expect(() => new BrokerSubprocessRuntime(new Context(), { pollYieldMs }, new FakeBridge(() => ({}))))
+        .toThrow('pollYieldMs must be 0 or an integer from 250 through 110000')
+    }
+  })
+
   it('preserves quota exhaustion during a poll without attempting an ordinary kill', async () => {
     const quota = new BrokerInvokeError('run_quota_exceeded', 403)
     const bridge = new FakeBridge(({ tool }) => {

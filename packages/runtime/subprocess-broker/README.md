@@ -36,6 +36,7 @@ Mount `dsh-runtime-broker` first; this provider injects its shared `ctx.runtimeB
 |---|---|---|
 | `cwd` | `/workspace` | Working directory used by executable lookup. |
 | `pollMs` | `100` | Delay between remote command status polls. |
+| `pollYieldMs` | `10000` | Broker wait (`yield_time_ms`) for each poll of a running command; the broker returns as soon as the command exits. `0` sends none (broker default 250 ms). |
 
 The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-aidsh-subprocess-broker) is the exhaustive source for accepted configuration fields.
 
