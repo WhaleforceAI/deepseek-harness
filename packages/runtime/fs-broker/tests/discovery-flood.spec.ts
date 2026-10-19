@@ -109,6 +109,8 @@ async function realisticBroker() {
   return {
     bridge, fs, count, discoveryPass, probes,
     set listingMode(value: typeof listingMode) { listingMode = value },
+    /** Change an entry's metadata as a command would, without a broker write. */
+    touch(path: string, change: Partial<Entry>) { tree.set(path, { ...tree.get(path)!, ...change }) },
   }
 }
 
@@ -146,15 +148,19 @@ describe('discovery cache against the real broker response shape', () => {
     expect(broker.count('stat_file')).toBe(firstPass + 1)
   })
 
-  it('still re-stats a discovery entry whose listing metadata changed', async () => {
+  it('re-stats only the discovery entry whose listed size or mtime changed', async () => {
     const broker = await realisticBroker()
     await broker.discoveryPass()
     const firstPass = broker.count('stat_file')
-    await broker.bridge.invoke('write_file', { path: '/workspace/AGENTS.md', content: 'changed instructions' })
-    await broker.bridge.invoke('exec_command', { cmd: 'true' })
+    broker.touch('/workspace/AGENTS.md', { mtime_ms: 50 })
+    await broker.bridge.invoke('exec_command', { cmd: 'touch AGENTS.md' })
     await broker.discoveryPass()
-    expect(broker.count('stat_file')).toBeGreaterThan(firstPass)
+    expect(broker.count('stat_file')).toBe(firstPass + 1)
+    broker.touch('/workspace/AGENTS.md', { size: 999 })
+    await broker.bridge.invoke('exec_command', { cmd: 'echo more >> AGENTS.md' })
+    await broker.discoveryPass()
+    expect(broker.count('stat_file')).toBe(firstPass + 2)
     const info = await broker.fs.stat(await broker.fs.resolve('/workspace/AGENTS.md'))
-    expect(info?.size).toBe('changed instructions'.length)
+    expect(info?.size).toBe(999)
   })
 })

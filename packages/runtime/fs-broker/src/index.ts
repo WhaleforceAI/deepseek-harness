@@ -446,7 +446,7 @@ export class BrokerFileSystem extends FileSystem {
   }
 
   private boundaryRejection(key: string, cached: CachedStat): boolean {
-    if (!('error' in cached)) return false
+    if (!('error' in cached) || cached.error.code !== 'file_path_outside_workspace') return false
     return posix.relative(this.config.cwd, key.slice(2)).startsWith('../')
   }
 
