@@ -27,7 +27,7 @@ Use the Runtime broker to route native tools, filesystem access, and subprocesse
 
 Mount this plugin once in the [Agent Runtime bundle](../../bundle/agent-runtime/cordis.patch.yml). Its `runtime-broker-tools` patch row supplies the run's `socketPath`, `secret`, and native `tools`. Filesystem and subprocess providers inject its shared `ctx.runtimeBroker` service.
 
-Native tool execution forwards the calling agent's session ID as top-level `session_id` and the tool runtime's call ID as `tool_call_id` when available. Tool arguments remain unchanged; calls without execution identity omit these fields. Filesystem and subprocess service calls without a native execution context keep the run-level bridge behavior.
+Native tool execution forwards the calling agent's session ID as top-level `session_id` and the tool runtime's call ID as `tool_call_id` when available. Tool arguments remain unchanged; calls without execution identity omit these fields. Filesystem and subprocess service calls, which have no tool execution input, send the session of the Agent that initiated the current asynchronous chain; agentless calls omit it.
 
 | Field | Default | Meaning |
 |---|---|---|

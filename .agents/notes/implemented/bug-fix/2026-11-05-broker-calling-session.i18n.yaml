@@ -1,3 +1,6 @@
-# Bilingual-pair consistency record (docs/i18n/README.md).
-2026-11-05-broker-calling-session.md: a3ee582946d0dec9f7bcfc8d7f9bc89cae5aa2e8
-2026-11-05-broker-calling-session.zh.md: c848f178a88cfe8296a7dc1e4a19f1740624af85
+# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
+# side as of the last confirmed-consistent state. Both languages carry equal authority;
+# after editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write .agents/notes/implemented/bug-fix/2026-11-05-broker-calling-session.md
+2026-11-05-broker-calling-session.md: 88e6ac2eaaff13568d21fdcb2aad56c922e23061
+2026-11-05-broker-calling-session.zh.md: 402b29e4b1f0189d91f53ebafd5ec772a4a66020

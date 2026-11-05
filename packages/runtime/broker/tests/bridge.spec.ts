@@ -374,6 +374,27 @@ describe('run-owned bridge', () => {
     }
   })
 
+  it('attributes a call without explicit identity to the initiating Agent', async () => {
+    const forwarded: Request[] = []
+    const { config } = await harness((request) => {
+      forwarded.push(request)
+      return { ok: true, result: {} }
+    })
+    const ctx = new Context()
+    cleanups.push(() => ctx.fiber.dispose())
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(AgentRegistry)
+    const fiber = await ctx.plugin(RuntimeBroker, config)
+    const provided = ctx.get('runtimeBroker')!
+    const child = { session: { id: 'child-session' } } as never
+    await ctx.agents.withInitiator(child, () => provided.invoke('stat_file', { path: '/workspace' }))
+    await ctx.agents.withInitiator(child, () => provided.invoke('stat_file', {}, undefined, { session_id: 'explicit' as never }))
+    await provided.invoke('stat_file', {})
+    expect(forwarded.map(request => request.session_id)).toEqual(['child-session', 'explicit', undefined])
+    await fiber.dispose()
+  })
+
   it('rejects a poll floor Agent Runtime would refuse', () => {
     for (const stdinPollYieldMs of [1, 249, 110_001, 1.5]) {
       expect(() => RuntimeBroker.apply({} as never, { stdinPollYieldMs } as never))
