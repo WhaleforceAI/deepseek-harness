@@ -27,7 +27,7 @@ kind: "package-reference"
 
 在 [Agent Runtime bundle](../../bundle/agent-runtime/cordis.patch.yml) 中挂载此 plugin（插件）一次。它的 `runtime-broker-tools` 补丁行提供运行的 `socketPath`、`secret` 和原生 `tools`。文件系统和子进程 provider（提供者）注入其共享的 `ctx.runtimeBroker` 服务。
 
-原生工具执行会在可用时，将调用代理的会话 ID 作为顶层 `session_id`，将工具运行时的调用 ID 作为 `tool_call_id` 转发。工具参数保持不变；没有执行身份的调用会省略这些字段。不含原生执行上下文的文件系统和子进程服务调用保留运行级桥接行为。
+原生工具执行会在可用时，将调用代理的会话 ID 作为顶层 `session_id`，将工具运行时的调用 ID 作为 `tool_call_id` 转发。工具参数保持不变；没有执行身份的调用会省略这些字段。文件系统和子进程服务调用没有工具执行输入，会发送发起当前异步链的代理的会话 ID；无代理的调用会省略该字段。
 
 | 字段 | 默认值 | 含义 |
 |---|---|---|

@@ -114,11 +114,25 @@ export class BrokerBridge {
   private terminal: BrokerInvokeError | undefined
   private readonly terminalListeners = new Set<(error: BrokerInvokeError) => void>()
   private readonly listingListeners = new Set<(path: string, result: unknown) => void>()
+  private initiatorSession: (() => BrokerInvocationContext['session_id']) | undefined
 
   constructor(readonly config: BrokerBridgeConfig) {
     if (!config.socketPath.startsWith('/') || config.secret.length < 32) {
       throw new Error('runtime-broker: invalid run bridge configuration')
     }
+  }
+
+  /**
+   * Set the lookup that attributes a call without an explicit session to the
+   * Agent driving the current asynchronous chain. Filesystem and subprocess
+   * providers reach the bridge without tool execution input; the host uses the
+   * session only for trace attribution.
+   * @param lookup - returns the initiating Agent's session id, or `undefined` for agentless calls.
+   * @returns a disposer that clears the lookup.
+   */
+  attributeInitiator(lookup: () => BrokerInvocationContext['session_id']): () => void {
+    this.initiatorSession = lookup
+    return () => { if (this.initiatorSession === lookup) this.initiatorSession = undefined }
   }
 
   /** Current filesystem mutation generation. */
@@ -269,7 +283,8 @@ export class BrokerBridge {
       socket.on('connect', () => {
         if (settled) return
         socket.write(JSON.stringify({ id, secret: this.config.secret, tool, arguments: args,
-          session_id: context?.session_id, tool_call_id: context?.tool_call_id }) + '\n')
+          session_id: context?.session_id ?? this.initiatorSession?.(),
+          tool_call_id: context?.tool_call_id }) + '\n')
       })
       socket.on('data', (chunk: string) => {
         body += chunk
@@ -342,6 +357,7 @@ export function apply(ctx: Context, config: Config): void {
   const bridge = new BrokerBridge(config)
   ctx.provide('runtimeBroker', bridge)
   ctx.effect(() => () => { bridge.dispose() })
+  ctx.effect(() => bridge.attributeInitiator(() => ctx.agents.currentInitiator()?.session.id))
   ctx.effect(() => bridge.onTerminal((error) => {
     const cause = { kind: 'hook' as const, reason: error.message }
     for (const agent of ctx.agents.list()) agent.cancel(cause)

@@ -18,4 +18,4 @@ The [Runtime broker](../../../../packages/runtime/broker/README.md) forwards `ex
 
 ## Consequences
 
-Native operations can select the calling Harness session without altering tool schemas or model-visible arguments. Providers that invoke the shared bridge without a native execution context retain run-level behavior. Focused socket tests cover distinct root and child identities and omitted metadata.
+Native operations can select the calling Harness session without altering tool schemas or model-visible arguments. Filesystem and subprocess providers invoke the shared bridge without tool execution input; the bridge attributes those calls to `ctx.agents.currentInitiator()`, the Agent that initiated the current asynchronous chain, and omits the session for agentless calls. Explicit execution identity takes precedence. Focused socket tests cover distinct root and child identities and omitted metadata.

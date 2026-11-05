@@ -18,4 +18,4 @@ Status: implemented
 
 ## Consequences
 
-原生操作可以选择发起调用的 Harness 会话，无需修改工具 schema 或模型可见参数。没有原生执行上下文、直接调用共享桥接的 provider 保留运行级行为。聚焦的 socket 测试覆盖不同的根代理与子代理身份，以及元数据缺省情况。
+原生操作可以选择发起调用的 Harness 会话，无需修改工具 schema 或模型可见参数。文件系统和子进程 provider 调用共享桥接时没有工具执行输入；桥接将这些调用归属于 `ctx.agents.currentInitiator()`，即发起当前异步链的代理，无代理的调用省略会话。显式执行身份优先。聚焦的 socket 测试覆盖不同的根代理与子代理身份，以及元数据缺省情况。
