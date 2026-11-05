@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto'
 import { createConnection } from 'node:net'
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import type {} from '@deepseek-ai/dsh-tools'
+import type { ToolExecutionInput } from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/dsh-agent'
 
 const MAX_BRIDGE_RESPONSE_BYTES = 12 * 1024 * 1024
@@ -29,6 +29,14 @@ export interface NativeBrokerTool {
   inputSchema: Record<string, unknown>
   /** Declared per-tool output byte limit; this adapter does not enforce it. */
   outputLimitBytes: number
+}
+
+/** Calling Harness execution identity, separate from broker tool arguments. */
+export interface BrokerInvocationContext {
+  /** Session belonging to the calling agent, when supplied by the tool runtime. */
+  session_id?: NonNullable<ToolExecutionInput['agent']>['session']['id']
+  /** Native tool execution identifier, when supplied by the tool runtime. */
+  tool_call_id?: ToolExecutionInput['callId']
 }
 
 /** Shared bridge settings and its native tool registrations. */
@@ -169,9 +177,10 @@ export class BrokerBridge {
    * @param tool - broker operation name.
    * @param args - JSON operation arguments.
    * @param signal - caller cancellation.
+   * @param context - optional calling session and tool execution identity.
    * @returns validated bridge result; operation-specific validation belongs to the provider.
    */
-  async invoke(tool: string, args: unknown, signal?: AbortSignal): Promise<unknown> {
+  async invoke(tool: string, args: unknown, signal?: AbortSignal, context?: BrokerInvocationContext): Promise<unknown> {
     this.assertAvailable(signal)
     const command = tool === 'exec_command' || tool === 'write_stdin'
     const mutation = command || tool === 'write_file'
@@ -183,7 +192,7 @@ export class BrokerBridge {
       else this.invalidate()
     }
     try {
-      const result = await this.exchange(tool, args, signal)
+      const result = await this.exchange(tool, args, signal, context)
       if (command) this.observeCommand(tool, args, result, commandEpoch)
       if (tool === 'list_files' && record(args) && typeof args.path === 'string') {
         for (const listener of this.listingListeners) {
@@ -236,7 +245,7 @@ export class BrokerBridge {
     else this.unknownCommand = true
   }
 
-  private exchange(tool: string, args: unknown, signal?: AbortSignal): Promise<unknown> {
+  private exchange(tool: string, args: unknown, signal?: AbortSignal, context?: BrokerInvocationContext): Promise<unknown> {
     const id = randomUUID()
     const combined = signal ? AbortSignal.any([signal, this.lifetime.signal]) : this.lifetime.signal
     return new Promise((resolve, reject) => {
@@ -259,7 +268,8 @@ export class BrokerBridge {
       socket.on('end', () => { finish(new Error('runtime-broker: bridge response incomplete')) })
       socket.on('connect', () => {
         if (settled) return
-        socket.write(JSON.stringify({ id, secret: this.config.secret, tool, arguments: args }) + '\n')
+        socket.write(JSON.stringify({ id, secret: this.config.secret, tool, arguments: args,
+          session_id: context?.session_id, tool_call_id: context?.tool_call_id }) + '\n')
       })
       socket.on('data', (chunk: string) => {
         body += chunk
@@ -363,8 +373,11 @@ export function apply(ctx: Context, config: Config): void {
         }],
       },
       timeoutMs: 120_000,
-      execute: (args: unknown, exec: { signal: AbortSignal }) =>
-        bridge.invoke(tool.name, stdinPollArguments(args, pollFloor), exec.signal),
+      execute: (args: unknown, exec) =>
+        bridge.invoke(tool.name, stdinPollArguments(args, pollFloor), exec.signal, {
+          ...(exec.agent ? { session_id: exec.agent.session.id } : {}),
+          tool_call_id: exec.callId,
+        }),
     }))
   }
 }

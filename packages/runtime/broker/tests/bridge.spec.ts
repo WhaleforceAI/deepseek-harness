@@ -11,7 +11,7 @@ import * as RuntimeBroker from '../src/index.ts'
 const cleanups: (() => Promise<void>)[] = []
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup() })
 
-interface Request { id: string; tool: string; arguments: Record<string, unknown> }
+interface Request { id: string; tool: string; arguments: Record<string, unknown>; session_id?: string; tool_call_id?: string }
 
 async function harness(reply: (request: Request) => unknown) {
   const directory = await mkdtemp('/tmp/dsh-broker-')
@@ -337,6 +337,41 @@ describe('run-owned bridge', () => {
       { session_id: 'p1', yield_time_ms: 3_000 },
       { cmd: 'sleep 60', yield_time_ms: 250 },
     ])
+  })
+
+  it('forwards native caller identity separately from arguments and omits absent identity', async () => {
+    const forwarded: Request[] = []
+    const { config, bridge } = await harness((request) => {
+      forwarded.push(request)
+      return { ok: true, result: {} }
+    })
+    const ctx = new Context()
+    cleanups.push(() => ctx.fiber.dispose())
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(AgentRegistry)
+    await ctx.plugin(RuntimeBroker, {
+      ...config,
+      tools: [{ name: 'lookup', description: 'Lookup.', inputSchema: { type: 'object' }, outputLimitBytes: 1024 }],
+    })
+    const tool = ctx.tools.get('lookup')!
+    for (const session of ['root-session', 'child-session']) {
+      await tool.execute({ session_id: 'argument-session' }, {
+        signal: new AbortController().signal,
+        agent: { session: { id: session } },
+        callId: session === 'child-session' ? 'call-1:code:1' : 'root-session-call',
+      } as never)
+    }
+    await tool.execute({}, { signal: new AbortController().signal } as never)
+    await bridge.invoke('lookup', {})
+    expect(forwarded.slice(0, 2)).toMatchObject([
+      { session_id: 'root-session', tool_call_id: 'root-session-call', arguments: { session_id: 'argument-session' } },
+      { session_id: 'child-session', tool_call_id: 'call-1:code:1', arguments: { session_id: 'argument-session' } },
+    ])
+    for (const request of forwarded.slice(2)) {
+      expect(request).not.toHaveProperty('session_id')
+      expect(request).not.toHaveProperty('tool_call_id')
+    }
   })
 
   it('rejects a poll floor Agent Runtime would refuse', () => {
